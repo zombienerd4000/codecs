@@ -315,8 +315,12 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
                         };
 
                         let src = out.len().wrapping_sub(off as usize);
-                        for i in 0..ln as usize {
-                            out.push(out[src + i]);
+                        if src + ln as usize <= out.len() {
+                            out.extend_from_within(src..src + ln as usize);
+                        } else {
+                            for i in 0..ln as usize {
+                                out.push(out[src + i]);
+                            }
                         }
                     }
                 }
