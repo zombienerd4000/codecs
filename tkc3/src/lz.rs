@@ -13,10 +13,7 @@ pub enum Token {
 }
 
 fn hash_key(data: &[u8], i: usize) -> u64 {
-    ((data[i] as u64) << 24)
-        | ((data[i + 1] as u64) << 16)
-        | ((data[i + 2] as u64) << 8)
-        | (data[i + 3] as u64)
+    u32::from_ne_bytes(data[i..i + 4].try_into().unwrap()) as u64
 }
 
 pub struct HashTables {
