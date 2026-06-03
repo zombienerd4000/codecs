@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 const MIN_MATCH: u32 = 3;
 const MAX_MATCH: u32 = 65535;
-pub const WINDOW: usize = 262144;
+pub const WINDOW: usize = 65536;
 const MAX_CANDIDATES: usize = 64;
 const NICE_MATCH: u32 = 128;
 
