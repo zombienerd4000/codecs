@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 flate2 = "1"
+rustc-hash = "2.1.2"
 zstd = "0.13"
 
 [profile.release]

@@ -1,10 +1,12 @@
 use crate::bit::{BitWriter, BitReader};
-use crate::lz::{Token, Transform, find_match, match_cost, build_hash, HashTables, WINDOW};
+use crate::lz::{Token, find_match, match_cost, build_hash, HashTables, WINDOW};
 use crate::huff;
 
 const MAGIC: u32 = 0x54484F52;
 const MAGIC_RAW: u32 = 0x524F4854;
 const LEN_CODES: usize = 29;
+const MAIN_SYMS: usize = 256 + LEN_CODES;
+const DIST_CODES: u16 = 32;
 
 const LEN_TABLE: [(u16, u8); LEN_CODES] = {
     let mut t = [(0u16, 0u8); LEN_CODES];
@@ -15,73 +17,65 @@ const LEN_TABLE: [(u16, u8); LEN_CODES] = {
     t[16] = (35, 3); t[17] = (43, 3); t[18] = (51, 3); t[19] = (59, 3);
     t[20] = (67, 4); t[21] = (83, 4); t[22] = (99, 4); t[23] = (115, 4);
     t[24] = (131, 5); t[25] = (163, 5); t[26] = (195, 5); t[27] = (227, 5);
-    t[28] = (258, 1);
+    t[28] = (258, 0);
     t
 };
 
-const DIST_CODES: usize = 32;
-const DIST_TABLE: [(u32, u8); DIST_CODES] = {
-    let mut t = [(0u32, 0u8); DIST_CODES];
+const DIST_TABLE: [(u32, u8); DIST_CODES as usize] = {
+    let mut t = [(0u32, 0u8); 32];
     t[0] = (1, 0); t[1] = (2, 0); t[2] = (3, 0); t[3] = (4, 0);
-    t[4] = (5, 1); t[5] = (7, 1); t[6] = (9, 2); t[7] = (13, 2);
-    t[8] = (17, 3); t[9] = (25, 3); t[10] = (33, 4); t[11] = (49, 4);
-    t[12] = (65, 5); t[13] = (97, 5); t[14] = (129, 6); t[15] = (193, 6);
-    t[16] = (257, 7); t[17] = (385, 7); t[18] = (513, 8); t[19] = (769, 8);
-    t[20] = (1025, 9); t[21] = (1537, 9); t[22] = (2049, 10); t[23] = (3073, 10);
-    t[24] = (4097, 11); t[25] = (6145, 11); t[26] = (8193, 12); t[27] = (12289, 12);
-    t[28] = (16385, 13); t[29] = (24577, 13); t[30] = (32769, 14); t[31] = (0, 0);
+    t[4] = (5, 1); t[5] = (7, 1);
+    t[6] = (9, 2); t[7] = (13, 2);
+    t[8] = (17, 3); t[9] = (25, 3);
+    t[10] = (33, 4); t[11] = (49, 4);
+    t[12] = (65, 5); t[13] = (97, 5);
+    t[14] = (129, 6); t[15] = (193, 6);
+    t[16] = (257, 7); t[17] = (385, 7);
+    t[18] = (513, 8); t[19] = (769, 8);
+    t[20] = (1025, 9); t[21] = (1537, 9);
+    t[22] = (2049, 10); t[23] = (3073, 10);
+    t[24] = (4097, 11); t[25] = (6145, 11);
+    t[26] = (8193, 12); t[27] = (12289, 12);
+    t[28] = (16385, 13); t[29] = (24577, 13);
+    t[30] = (32769, 14); t[31] = (49152, 14);
     t
 };
-
-const MAIN_SYMS: usize = 256 + LEN_CODES * 4;  // 372
-
-fn transform_to_idx(t: Transform) -> u16 {
-    match t {
-        Transform::Exact => 0,
-        Transform::Xor => 1,
-        Transform::Add => 2,
-        Transform::Sub => 3,
-    }
-}
 
 fn length_to_code(ln: u32) -> (u16, u32) {
     match ln {
         3 => (256, 0), 4 => (257, 0), 5 => (258, 0), 6 => (259, 0),
         7 => (260, 0), 8 => (261, 0), 9 => (262, 0), 10 => (263, 0),
-        11..=12 => (264, (ln - 11) as u32),
-        13..=14 => (265, (ln - 13) as u32),
-        15..=16 => (266, (ln - 15) as u32),
-        17..=18 => (267, (ln - 17) as u32),
-        19..=22 => (268, (ln - 19) as u32),
-        23..=26 => (269, (ln - 23) as u32),
-        27..=30 => (270, (ln - 27) as u32),
-        31..=34 => (271, (ln - 31) as u32),
-        35..=42 => (272, (ln - 35) as u32),
-        43..=50 => (273, (ln - 43) as u32),
-        51..=58 => (274, (ln - 51) as u32),
-        59..=66 => (275, (ln - 59) as u32),
-        67..=82 => (276, (ln - 67) as u32),
-        83..=98 => (277, (ln - 83) as u32),
-        99..=114 => (278, (ln - 99) as u32),
-        115..=130 => (279, (ln - 115) as u32),
-        131..=162 => (280, (ln - 131) as u32),
-        163..=194 => (281, (ln - 163) as u32),
-        195..=226 => (282, (ln - 195) as u32),
-        227..=257 => (283, (ln - 227) as u32),
+        11..=12 => (264, ln - 11),
+        13..=14 => (265, ln - 13),
+        15..=16 => (266, ln - 15),
+        17..=18 => (267, ln - 17),
+        19..=22 => (268, ln - 19),
+        23..=26 => (269, ln - 23),
+        27..=30 => (270, ln - 27),
+        31..=34 => (271, ln - 31),
+        35..=42 => (272, ln - 35),
+        43..=50 => (273, ln - 43),
+        51..=58 => (274, ln - 51),
+        59..=66 => (275, ln - 59),
+        67..=82 => (276, ln - 67),
+        83..=98 => (277, ln - 83),
+        99..=114 => (278, ln - 99),
+        115..=130 => (279, ln - 115),
+        131..=162 => (280, ln - 131),
+        163..=194 => (281, ln - 163),
+        195..=226 => (282, ln - 195),
+        227..=257 => (283, ln - 227),
         _ => (284, 258),
     }
 }
 
-fn match_sym(ln: u32, t: Transform) -> u16 {
+fn match_sym(ln: u32) -> u16 {
     let (code, _) = length_to_code(ln);
-    256 + (code - 256) * 4 + transform_to_idx(t)
+    code
 }
 
-fn sym_to_match(sym: u16) -> (usize, u32) {
-    let raw = sym - 256;
-    let code_idx = (raw / 4) as usize;
-    let t_code = (raw % 4) as u32;
-    (code_idx, t_code)
+fn sym_to_match(sym: u16) -> usize {
+    (sym - 256) as usize
 }
 
 fn distance_to_code(dist: u32) -> (u16, u32, bool) {
@@ -126,7 +120,6 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
     const MIN_LAST_BLOCK: usize = 32768;
     let n = data.len();
 
-    // Analyse the first 64K to pick a strategy
     let mut freq = [0u32; 256];
     let mut unique = 0usize;
     for &b in &data[..n.min(65536)] {
@@ -190,14 +183,22 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
             lit_cost = (entropy.round() as i64).max(2).min(8);
         }
 
-        let use_3byte_xor = unique <= 10;
-        let ht = build_hash(ext_data, use_3byte_xor);
-
         let mut tokens = Vec::new();
         let mut main_freq = vec![0u32; MAIN_SYMS];
-        let mut dist_freq = vec![0u32; DIST_CODES];
+        let mut dist_freq = vec![0u32; DIST_CODES as usize];
         let mut pos = block_start - win_start;
-        parse_tokens(ext_data, &ht, &mut tokens, &mut main_freq, &mut dist_freq, &mut pos, low_entropy, lit_cost, use_3byte_xor);
+
+        if unique <= 10 {
+            while pos < ext_data.len() {
+                let b = ext_data[pos];
+                tokens.push(Token::Lit(b));
+                main_freq[b as usize] += 1;
+                pos += 1;
+            }
+        } else {
+            let ht = build_hash(ext_data);
+            parse_tokens(ext_data, &ht, &mut tokens, &mut main_freq, &mut dist_freq, &mut pos, low_entropy, lit_cost);
+        }
 
         let main_huff = huff::build(&main_freq);
         let dist_huff = huff::build(&dist_freq);
@@ -209,24 +210,22 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
                     let (code, len) = main_huff.encode(b as u16);
                     w.write_bits(code, len as u32);
                 }
-                Token::Match { off, ln, t, param } => {
-                    let sym = match_sym(ln, t);
+                Token::Match { off, ln } => {
+                    let sym = match_sym(ln);
                     let (c, l) = main_huff.encode(sym);
                     w.write_bits(c, l as u32);
 
                     let (code, extra) = length_to_code(ln);
                     let len_extra = LEN_TABLE[(code - 256) as usize].1 as u32;
-                    if len_extra > 0 {
-                        if code == 284 && ln > 258 {
+                    if code == 284 {
+                        if ln > 258 {
                             w.write_bits(1, 1);
                             w.write_vlq(ln - 258);
                         } else {
-                            w.write_bits(extra, len_extra);
+                            w.write_bits(0, 1);
                         }
-                    }
-
-                    if t != Transform::Exact {
-                        w.write_byte(param);
+                    } else if len_extra > 0 {
+                        w.write_bits(extra, len_extra);
                     }
 
                     let (d_code, d_extra, d_overflow) = distance_to_code(off);
@@ -253,19 +252,8 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
         h.flush();
         let header_bytes = h.into_bytes();
 
-        let raw_size = block_end - block_start;
-        let compressed_size = header_bytes.len() + bitstream.len();
-        if compressed_size >= raw_size {
-            let mut raw = BitWriter::new();
-            raw.write_bits(MAGIC_RAW, 32);
-            raw.write_vlq(raw_size as u32);
-            raw.flush();
-            output.extend(raw.into_bytes());
-            output.extend_from_slice(&data[block_start..block_end]);
-        } else {
-            output.extend(header_bytes);
-            output.extend(bitstream);
-        }
+        output.extend_from_slice(&header_bytes);
+        output.extend_from_slice(&bitstream);
 
         block_start = block_end;
     }
@@ -295,7 +283,7 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
             MAGIC => {
                 let block_n = r.read_vlq() as usize;
                 let main_huff = read_huff_table(&mut r, MAIN_SYMS);
-                let dist_huff = read_huff_table(&mut r, DIST_CODES);
+                let dist_huff = read_huff_table(&mut r, DIST_CODES as usize);
                 r.align();
 
                 let dst = out.len();
@@ -306,21 +294,17 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
                     if sym < 256 {
                         out.push(sym as u8);
                     } else {
-                        let (code_idx, t_code) = sym_to_match(sym);
+                        let code_idx = sym_to_match(sym);
                         let (base_len, extra) = LEN_TABLE[code_idx];
                         let mut ln = base_len as u32;
-                        if extra > 0 {
-                            if code_idx == 28 {
-                                let marker = r.read_bit();
-                                if marker == 1 {
-                                    ln += r.read_vlq();
-                                }
-                            } else {
-                                ln += r.read_bits(extra as u32);
+                        if code_idx == 28 {
+                            let marker = r.read_bit();
+                            if marker == 1 {
+                                ln += r.read_vlq();
                             }
+                        } else if extra > 0 {
+                            ln += r.read_bits(extra as u32);
                         }
-
-                        let p = if t_code != 0 { r.read_bits(8) as u8 } else { 0u8 };
 
                         let d_sym = dist_huff.decode(|| r.read_bit());
                         let (base_dist, d_extra) = DIST_TABLE[d_sym as usize];
@@ -332,13 +316,7 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
 
                         let src = out.len().wrapping_sub(off as usize);
                         for i in 0..ln as usize {
-                            let val: u8 = out[src + i];
-                            out.push(match t_code {
-                                0 => val,
-                                1 => val ^ p,
-                                2 => val.wrapping_add(p),
-                                _ => val.wrapping_sub(p),
-                            });
+                            out.push(out[src + i]);
                         }
                     }
                 }
@@ -406,26 +384,26 @@ fn read_huff_table(r: &mut BitReader, n: usize) -> huff::Huffman {
     huff
 }
 
-fn lazy_skip(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables, lit_cost: i64, use_3byte_xor: bool) -> bool {
+fn lazy_skip(data: &[u8], pos: usize, ln: u32, off: u32, ht: &HashTables, lit_cost: i64) -> bool {
     ln <= 5 && pos + 1 + 5 <= data.len()
-        && find_match(data, pos + 1, ht, lit_cost, use_3byte_xor)
+        && find_match(data, pos + 1, ht, lit_cost)
             .map(|next| {
-                if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
-                    let cur_sav = ln as i64 * 8 - match_cost(off, ln, t);
-                    let nxt_sav = (l2 + 1) as i64 * 8 - (6 + match_cost(o2, l2, t2));
+                if let Token::Match { off: o2, ln: l2 } = next {
+                    let cur_sav = ln as i64 * 8 - match_cost(off, ln);
+                    let nxt_sav = (l2 + 1) as i64 * 8 - (6 + match_cost(o2, l2));
                     nxt_sav > cur_sav + 8
                 } else { false }
             })
             .unwrap_or(false)
 }
 
-fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables, lit_cost: i64, use_3byte_xor: bool) -> bool {
+fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, ht: &HashTables, lit_cost: i64) -> bool {
     ln <= 5 && pos + 1 + 5 <= data.len()
-        && find_match(data, pos + 1, ht, lit_cost, use_3byte_xor)
+        && find_match(data, pos + 1, ht, lit_cost)
             .map(|next| {
-                if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
-                    let skip_cost = lit_cost + match_cost(o2, l2, t2);
-                    let take_cost = match_cost(off, ln, t);
+                if let Token::Match { off: o2, ln: l2 } = next {
+                    let skip_cost = lit_cost + match_cost(o2, l2);
+                    let take_cost = match_cost(off, ln);
                     skip_cost < take_cost
                 } else { false }
             })
@@ -433,15 +411,15 @@ fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: 
 }
 
 fn parse_tokens(data: &[u8], ht: &HashTables,
-                tokens: &mut Vec<Token>, main_freq: &mut [u32], dist_freq: &mut [u32], pos: &mut usize, low_entropy: bool, lit_cost: i64, use_3byte_xor: bool) {
+                tokens: &mut Vec<Token>, main_freq: &mut [u32], dist_freq: &mut [u32], pos: &mut usize, low_entropy: bool, lit_cost: i64) {
     let n = data.len();
     while *pos < n {
-        if let Some(tok) = find_match(data, *pos, ht, lit_cost, use_3byte_xor) {
-            if let Token::Match { off, ln, t, .. } = tok {
+        if let Some(tok) = find_match(data, *pos, ht, lit_cost) {
+            if let Token::Match { off, ln } = tok {
                 let lazy = if low_entropy {
-                    lazy_skip_cost(data, *pos, ln, off, t, ht, lit_cost, use_3byte_xor)
+                    lazy_skip_cost(data, *pos, ln, off, ht, lit_cost)
                 } else {
-                    lazy_skip(data, *pos, ln, off, t, ht, lit_cost, use_3byte_xor)
+                    lazy_skip(data, *pos, ln, off, ht, lit_cost)
                 };
                 if lazy {
                     tokens.push(Token::Lit(data[*pos]));
@@ -450,7 +428,7 @@ fn parse_tokens(data: &[u8], ht: &HashTables,
                     continue;
                 }
                 tokens.push(tok);
-                let sym = match_sym(ln, t);
+                let sym = match_sym(ln);
                 main_freq[sym as usize] += 1;
                 let (d_code, _, _) = distance_to_code(off);
                 dist_freq[d_code as usize] += 1;
