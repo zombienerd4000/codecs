@@ -110,4 +110,8 @@ impl<'a> BitReader<'a> {
             self.byte = 0;
         }
     }
+
+    pub fn advance_bytes(&mut self, n: usize) {
+        self.pos += n;
+    }
 }

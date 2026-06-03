@@ -138,17 +138,17 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
         let mut main_freq = vec![0u32; MAIN_SYMS];
         let mut dist_freq = vec![0u32; DIST_CODES];
         let mut pos = block_start - win_start;
-        parse_tokens(ext_data, &ht, &mut tokens, &mut main_freq, &mut dist_freq, &mut pos);
-        let lit_count = tokens.iter().filter(|t| matches!(t, Token::Lit(_))).count();
-        let match_count = tokens.len() - lit_count;
-        let avg_ln = if match_count > 0 {
-            tokens.iter().filter_map(|t| if let Token::Match { ln, .. } = t { Some(*ln) } else { None }).sum::<u32>() / match_count as u32
-        } else { 0 };
-                if lit_count > 0 && match_count > 0 && lit_count + match_count > 1000 {
-                    eprintln!("block {}: {} tokens ({} lit, {} match, avg_ln={})",
-                              block_start / BLOCK_SIZE,
-                              tokens.len(), lit_count, match_count, avg_ln);
-                }
+        let mut seen = [false; 256];
+        let mut unique = 0usize;
+        for &b in &data[block_start..block_end] {
+            if !seen[b as usize] {
+                seen[b as usize] = true;
+                unique += 1;
+                if unique > 32 { break; }
+            }
+        }
+        let low_entropy = unique <= 32;
+        parse_tokens(ext_data, &ht, &mut tokens, &mut main_freq, &mut dist_freq, &mut pos, low_entropy);
 
         let main_huff = huff::build(&main_freq);
         let dist_huff = huff::build(&dist_freq);
@@ -202,18 +202,23 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
         write_huff_table(&mut h, &main_huff.len);
         write_huff_table(&mut h, &dist_huff.len);
         h.flush();
-        output.extend(h.into_bytes());
-        output.extend(bitstream);
+        let header_bytes = h.into_bytes();
+
+        let raw_size = block_end - block_start;
+        let compressed_size = header_bytes.len() + bitstream.len();
+        if compressed_size >= raw_size {
+            let mut raw = BitWriter::new();
+            raw.write_bits(MAGIC_RAW, 32);
+            raw.write_vlq(raw_size as u32);
+            raw.flush();
+            output.extend(raw.into_bytes());
+            output.extend_from_slice(&data[block_start..block_end]);
+        } else {
+            output.extend(header_bytes);
+            output.extend(bitstream);
+        }
 
         block_start = block_end;
-    }
-
-    if output.len() >= n + 8 {
-        let mut raw = BitWriter::new();
-        raw.write_bits(MAGIC_RAW, 32);
-        raw.write_vlq(n as u32);
-        raw.flush();
-        return raw.into_bytes().into_iter().chain(data.iter().copied()).collect();
     }
 
     output
@@ -232,11 +237,11 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
         match magic {
             MAGIC_RAW => {
                 let n = r.read_vlq() as usize;
-                let remaining = &compressed[r.byte_pos()..];
-                if remaining.len() >= n {
-                    out.extend_from_slice(&remaining[..n]);
+                let byte_pos = r.byte_pos();
+                if byte_pos + n <= compressed.len() {
+                    out.extend_from_slice(&compressed[byte_pos..byte_pos + n]);
+                    r.advance_bytes(n);
                 }
-                break;
             }
             MAGIC => {
                 let block_n = r.read_vlq() as usize;
@@ -352,22 +357,43 @@ fn read_huff_table(r: &mut BitReader, n: usize) -> huff::Huffman {
     huff
 }
 
+fn lazy_skip(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables) -> bool {
+    ln <= 5 && pos + 1 + 5 <= data.len()
+        && find_match(data, pos + 1, ht)
+            .map(|next| {
+                if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
+                    let cur_sav = ln as i64 * 8 - match_cost(off, ln, t);
+                    let nxt_sav = (l2 + 1) as i64 * 8 - (6 + match_cost(o2, l2, t2));
+                    nxt_sav > cur_sav + 8
+                } else { false }
+            })
+            .unwrap_or(false)
+}
+
+fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables) -> bool {
+    ln <= 5 && pos + 1 + 5 <= data.len()
+        && find_match(data, pos + 1, ht)
+            .map(|next| {
+                if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
+                    let skip_cost = 6i64 + match_cost(o2, l2, t2);
+                    let take_cost = match_cost(off, ln, t);
+                    skip_cost < take_cost
+                } else { false }
+            })
+            .unwrap_or(false)
+}
+
 fn parse_tokens(data: &[u8], ht: &HashTables,
-                tokens: &mut Vec<Token>, main_freq: &mut [u32], dist_freq: &mut [u32], pos: &mut usize) {
+                tokens: &mut Vec<Token>, main_freq: &mut [u32], dist_freq: &mut [u32], pos: &mut usize, low_entropy: bool) {
     let n = data.len();
     while *pos < n {
         if let Some(tok) = find_match(data, *pos, ht) {
             if let Token::Match { off, ln, t, .. } = tok {
-                let lazy = ln <= 5 && *pos + 1 + 5 <= n
-                    && find_match(data, *pos + 1, ht)
-                        .map(|next| {
-                            if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
-                                let skip_cost = 6 + match_cost(o2, l2, t2);
-                                let take_cost = match_cost(off, ln, t);
-                                skip_cost < take_cost
-                            } else { false }
-                        })
-                        .unwrap_or(false);
+                let lazy = if low_entropy {
+                    lazy_skip_cost(data, *pos, ln, off, t, ht)
+                } else {
+                    lazy_skip(data, *pos, ln, off, t, ht)
+                };
                 if lazy {
                     tokens.push(Token::Lit(data[*pos]));
                     main_freq[data[*pos] as usize] += 1;
