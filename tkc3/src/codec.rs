@@ -121,7 +121,7 @@ fn distance_to_code(dist: u32) -> (u16, u32, bool) {
 pub fn compress(data: &[u8]) -> Vec<u8> {
     if data.is_empty() { return Vec::new(); }
 
-    const BLOCK_SIZE: usize = 262144;
+    const BLOCK_SIZE: usize = 65536;
     let n = data.len();
 
     let mut output = Vec::new();
