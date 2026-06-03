@@ -20,15 +20,24 @@ pub enum Token {
     Match { off: u32, ln: u32, t: Transform, param: u8 },
 }
 
-fn hash_keys(data: &[u8], i: usize) -> (u64, u64) {
+fn hash_keys_3(data: &[u8], i: usize) -> (u64, u64) {
+    let x = ((data[i] as u64) << 16)
+        | ((data[i + 1] as u64) << 8)
+        | (data[i + 2] as u64);
+    let d = ((data[i + 1].wrapping_sub(data[i]) as u64) & 0xff) << 16
+        | ((data[i + 2].wrapping_sub(data[i + 1]) as u64) & 0xff) << 8
+        | ((data[i + 3].wrapping_sub(data[i + 2]) as u64) & 0xff);
+    (x, d)
+}
+
+fn hash_keys_4(data: &[u8], i: usize) -> (u64, u64) {
     let x = ((data[i] as u64) << 24)
         | ((data[i + 1] as u64) << 16)
         | ((data[i + 2] as u64) << 8)
         | (data[i + 3] as u64);
-    let d = ((data[i + 1].wrapping_sub(data[i]) as u64) & 0xff) << 24
-        | ((data[i + 2].wrapping_sub(data[i + 1]) as u64) & 0xff) << 16
-        | ((data[i + 3].wrapping_sub(data[i + 2]) as u64) & 0xff) << 8
-        | ((data[i + 4].wrapping_sub(data[i + 3]) as u64) & 0xff);
+    let d = ((data[i + 1].wrapping_sub(data[i]) as u64) & 0xff) << 16
+        | ((data[i + 2].wrapping_sub(data[i + 1]) as u64) & 0xff) << 8
+        | ((data[i + 3].wrapping_sub(data[i + 2]) as u64) & 0xff);
     (x, d)
 }
 
@@ -37,16 +46,26 @@ pub struct HashTables {
     pub add_ht: HashMap<u64, Vec<u32>>,
 }
 
-pub fn build_hash(data: &[u8]) -> HashTables {
+pub fn build_hash(data: &[u8], use_3byte_xor: bool) -> HashTables {
     let n = data.len();
     let mut xor_ht: HashMap<u64, Vec<u32>> = HashMap::new();
     let mut add_ht: HashMap<u64, Vec<u32>> = HashMap::new();
 
-    if n >= 5 {
-        for i in 0..n - 4 {
-            let (x, d) = hash_keys(data, i);
-            xor_ht.entry(x).or_default().push(i as u32);
-            add_ht.entry(d).or_default().push(i as u32);
+    if use_3byte_xor {
+        if n >= 4 {
+            for i in 0..n - 3 {
+                let (x, d) = hash_keys_3(data, i);
+                xor_ht.entry(x).or_default().push(i as u32);
+                add_ht.entry(d).or_default().push(i as u32);
+            }
+        }
+    } else {
+        if n >= 4 {
+            for i in 0..n - 3 {
+                let (x, d) = hash_keys_4(data, i);
+                xor_ht.entry(x).or_default().push(i as u32);
+                add_ht.entry(d).or_default().push(i as u32);
+            }
         }
     }
 
@@ -84,12 +103,11 @@ pub fn match_cost(off: u32, ln: u32, t: Transform) -> i64 {
     (offset_bits(off) + length_bits(ln) + if t == Transform::Exact { 0 } else { 8 }) as i64
 }
 
-fn eval_candidate(data: &[u8], pos: usize, off: usize, max_len: usize, best_sav: &mut i64, best: &mut Option<(u32, u32, Transform, u8)>) {
-    // Exact (cheapest, try first)
+fn eval_candidate(data: &[u8], pos: usize, off: usize, max_len: usize, lit_cost: i64, best_sav: &mut i64, best: &mut Option<(u32, u32, Transform, u8)>) {
     let mut ln = 0usize;
     while ln < max_len && data[pos + ln] == data[off + ln] { ln += 1; }
     if ln >= MIN_MATCH as usize {
-        let sav = ln as i64 * 8 - match_cost((pos - off) as u32, ln as u32, Transform::Exact);
+        let sav = ln as i64 * lit_cost - match_cost((pos - off) as u32, ln as u32, Transform::Exact);
         if sav > *best_sav {
             *best_sav = sav;
             *best = Some(((pos - off) as u32, ln as u32, Transform::Exact, 0));
@@ -97,12 +115,11 @@ fn eval_candidate(data: &[u8], pos: usize, off: usize, max_len: usize, best_sav:
         if ln == max_len { return; }
     }
 
-    // Xor
     let p = data[pos] ^ data[off];
     ln = 1usize;
     while ln < max_len && data[pos + ln] ^ p == data[off + ln] { ln += 1; }
     if ln >= MIN_MATCH as usize {
-        let sav = ln as i64 * 8 - match_cost((pos - off) as u32, ln as u32, Transform::Xor);
+        let sav = ln as i64 * lit_cost - match_cost((pos - off) as u32, ln as u32, Transform::Xor);
         if sav > *best_sav {
             *best_sav = sav;
             *best = Some(((pos - off) as u32, ln as u32, Transform::Xor, p));
@@ -110,12 +127,11 @@ fn eval_candidate(data: &[u8], pos: usize, off: usize, max_len: usize, best_sav:
         if ln == max_len { return; }
     }
 
-    // Add
     let p = data[pos].wrapping_sub(data[off]);
     ln = 1usize;
     while ln < max_len && data[pos + ln].wrapping_sub(p) == data[off + ln] { ln += 1; }
     if ln >= MIN_MATCH as usize {
-        let sav = ln as i64 * 8 - match_cost((pos - off) as u32, ln as u32, Transform::Add);
+        let sav = ln as i64 * lit_cost - match_cost((pos - off) as u32, ln as u32, Transform::Add);
         if sav > *best_sav {
             *best_sav = sav;
             *best = Some(((pos - off) as u32, ln as u32, Transform::Add, p));
@@ -123,12 +139,11 @@ fn eval_candidate(data: &[u8], pos: usize, off: usize, max_len: usize, best_sav:
         if ln == max_len { return; }
     }
 
-    // Sub
     let p = data[off].wrapping_sub(data[pos]);
     ln = 1usize;
     while ln < max_len && data[pos + ln].wrapping_add(p) == data[off + ln] { ln += 1; }
     if ln >= MIN_MATCH as usize {
-        let sav = ln as i64 * 8 - match_cost((pos - off) as u32, ln as u32, Transform::Sub);
+        let sav = ln as i64 * lit_cost - match_cost((pos - off) as u32, ln as u32, Transform::Sub);
         if sav > *best_sav {
             *best_sav = sav;
             *best = Some(((pos - off) as u32, ln as u32, Transform::Sub, p));
@@ -136,9 +151,9 @@ fn eval_candidate(data: &[u8], pos: usize, off: usize, max_len: usize, best_sav:
     }
 }
 
-pub fn find_match(data: &[u8], pos: usize, ht: &HashTables) -> Option<Token> {
-    if pos + 5 > data.len() { return None; }
-    let (x, d) = hash_keys(data, pos);
+pub fn find_match(data: &[u8], pos: usize, ht: &HashTables, lit_cost: i64, use_3byte_xor: bool) -> Option<Token> {
+    if pos + 4 > data.len() { return None; }
+    let (x, d) = if use_3byte_xor { hash_keys_3(data, pos) } else { hash_keys_4(data, pos) };
     let lo = 0;
     let max_len = (data.len() - pos).min(MAX_MATCH as usize);
 
@@ -151,21 +166,19 @@ pub fn find_match(data: &[u8], pos: usize, ht: &HashTables) -> Option<Token> {
         };
     }
 
-    // Phase 1: xor hash table (4-byte raw)
     if let Some(positions) = ht.xor_ht.get(&x) {
         let mut checked = 0usize;
         for &c in positions.iter().rev() {
             if found_perfect!() { break; }
             let cu = c as usize;
             if cu >= lo && cu < pos {
-                eval_candidate(data, pos, cu, max_len, &mut best_sav, &mut best);
+                eval_candidate(data, pos, cu, max_len, lit_cost, &mut best_sav, &mut best);
                 checked += 1;
                 if checked >= MAX_XOR { break; }
             }
         }
     }
 
-    // Phase 2: delta hash table (for add/sub)
     if !found_perfect!() {
         if let Some(positions) = ht.add_ht.get(&d) {
             let mut checked = 0usize;
@@ -173,7 +186,7 @@ pub fn find_match(data: &[u8], pos: usize, ht: &HashTables) -> Option<Token> {
                 if found_perfect!() { break; }
                 let cu = c as usize;
                 if cu >= lo && cu < pos {
-                    eval_candidate(data, pos, cu, max_len, &mut best_sav, &mut best);
+                    eval_candidate(data, pos, cu, max_len, lit_cost, &mut best_sav, &mut best);
                     checked += 1;
                     if checked >= MAX_ADD { break; }
                 }

@@ -121,34 +121,83 @@ fn distance_to_code(dist: u32) -> (u16, u32, bool) {
 pub fn compress(data: &[u8]) -> Vec<u8> {
     if data.is_empty() { return Vec::new(); }
 
-    const BLOCK_SIZE: usize = 65536;
+    const BLOCK_SIZE_64K: usize = 65536;
+    const BLOCK_SIZE_256K: usize = 262144;
+    const MIN_LAST_BLOCK: usize = 32768;
     let n = data.len();
+
+    // Analyse the first 64K to pick a strategy
+    let mut freq = [0u32; 256];
+    let mut unique = 0usize;
+    for &b in &data[..n.min(65536)] {
+        if freq[b as usize] == 0 { unique += 1; }
+        freq[b as usize] += 1;
+    }
+
+    let block_size = if unique <= 10 {
+        BLOCK_SIZE_64K
+    } else {
+        let max_freq = *freq.iter().max().unwrap_or(&0);
+        if max_freq as usize > n.min(65536) / 2 {
+            BLOCK_SIZE_256K
+        } else if n > 131072 {
+            let mut freq2 = [0u32; 256];
+            for &b in &data[65536..131072.min(n)] {
+                freq2[b as usize] += 1;
+            }
+            let mut l1 = 0.0f64;
+            let sz = 65536.0f64;
+            for i in 0..256 {
+                l1 += (freq[i] as f64 / sz - freq2[i] as f64 / sz).abs();
+            }
+            if l1 < 0.15 { BLOCK_SIZE_256K } else { BLOCK_SIZE_64K }
+        } else {
+            BLOCK_SIZE_64K
+        }
+    };
 
     let mut output = Vec::new();
     let mut block_start = 0;
 
     while block_start < n {
-        let block_end = (block_start + BLOCK_SIZE).min(n);
+        let mut block_end = (block_start + block_size).min(n);
+        let remaining_after = n - block_end;
+        if remaining_after > 0 && remaining_after < MIN_LAST_BLOCK {
+            block_end = n;
+        }
         let win_start = block_start.saturating_sub(WINDOW);
         let ext_data = &data[win_start..block_end];
 
-        let ht = build_hash(ext_data);
+        let mut block_freq = [0u32; 256];
+        let mut unique = 0usize;
+        for &b in &data[block_start..block_end] {
+            if block_freq[b as usize] == 0 { unique += 1; }
+            block_freq[b as usize] += 1;
+        }
+        let block_len = block_end - block_start;
+        let max_freq = *block_freq.iter().max().unwrap_or(&0);
+        let low_entropy = unique <= 32 || max_freq * 2 > block_len as u32;
+        let mut lit_cost = 8i64;
+        if low_entropy {
+            let total = block_len as f64;
+            let mut entropy = 0.0f64;
+            for &count in block_freq.iter() {
+                if count > 0 {
+                    let p = count as f64 / total;
+                    entropy -= p * p.log2();
+                }
+            }
+            lit_cost = (entropy.round() as i64).max(2).min(8);
+        }
+
+        let use_3byte_xor = unique <= 10;
+        let ht = build_hash(ext_data, use_3byte_xor);
 
         let mut tokens = Vec::new();
         let mut main_freq = vec![0u32; MAIN_SYMS];
         let mut dist_freq = vec![0u32; DIST_CODES];
         let mut pos = block_start - win_start;
-        let mut seen = [false; 256];
-        let mut unique = 0usize;
-        for &b in &data[block_start..block_end] {
-            if !seen[b as usize] {
-                seen[b as usize] = true;
-                unique += 1;
-                if unique > 32 { break; }
-            }
-        }
-        let low_entropy = unique <= 32;
-        parse_tokens(ext_data, &ht, &mut tokens, &mut main_freq, &mut dist_freq, &mut pos, low_entropy);
+        parse_tokens(ext_data, &ht, &mut tokens, &mut main_freq, &mut dist_freq, &mut pos, low_entropy, lit_cost, use_3byte_xor);
 
         let main_huff = huff::build(&main_freq);
         let dist_huff = huff::build(&dist_freq);
@@ -357,9 +406,9 @@ fn read_huff_table(r: &mut BitReader, n: usize) -> huff::Huffman {
     huff
 }
 
-fn lazy_skip(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables) -> bool {
+fn lazy_skip(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables, lit_cost: i64, use_3byte_xor: bool) -> bool {
     ln <= 5 && pos + 1 + 5 <= data.len()
-        && find_match(data, pos + 1, ht)
+        && find_match(data, pos + 1, ht, lit_cost, use_3byte_xor)
             .map(|next| {
                 if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
                     let cur_sav = ln as i64 * 8 - match_cost(off, ln, t);
@@ -370,12 +419,12 @@ fn lazy_skip(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &Hash
             .unwrap_or(false)
 }
 
-fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables) -> bool {
+fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: &HashTables, lit_cost: i64, use_3byte_xor: bool) -> bool {
     ln <= 5 && pos + 1 + 5 <= data.len()
-        && find_match(data, pos + 1, ht)
+        && find_match(data, pos + 1, ht, lit_cost, use_3byte_xor)
             .map(|next| {
                 if let Token::Match { off: o2, ln: l2, t: t2, .. } = next {
-                    let skip_cost = 6i64 + match_cost(o2, l2, t2);
+                    let skip_cost = lit_cost + match_cost(o2, l2, t2);
                     let take_cost = match_cost(off, ln, t);
                     skip_cost < take_cost
                 } else { false }
@@ -384,15 +433,15 @@ fn lazy_skip_cost(data: &[u8], pos: usize, ln: u32, off: u32, t: Transform, ht: 
 }
 
 fn parse_tokens(data: &[u8], ht: &HashTables,
-                tokens: &mut Vec<Token>, main_freq: &mut [u32], dist_freq: &mut [u32], pos: &mut usize, low_entropy: bool) {
+                tokens: &mut Vec<Token>, main_freq: &mut [u32], dist_freq: &mut [u32], pos: &mut usize, low_entropy: bool, lit_cost: i64, use_3byte_xor: bool) {
     let n = data.len();
     while *pos < n {
-        if let Some(tok) = find_match(data, *pos, ht) {
+        if let Some(tok) = find_match(data, *pos, ht, lit_cost, use_3byte_xor) {
             if let Token::Match { off, ln, t, .. } = tok {
                 let lazy = if low_entropy {
-                    lazy_skip_cost(data, *pos, ln, off, t, ht)
+                    lazy_skip_cost(data, *pos, ln, off, t, ht, lit_cost, use_3byte_xor)
                 } else {
-                    lazy_skip(data, *pos, ln, off, t, ht)
+                    lazy_skip(data, *pos, ln, off, t, ht, lit_cost, use_3byte_xor)
                 };
                 if lazy {
                     tokens.push(Token::Lit(data[*pos]));
