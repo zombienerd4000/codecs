@@ -75,7 +75,7 @@ pub fn find_match(data: &[u8], pos: usize, ht: &HashTables, lit_cost: i64) -> Op
 
     if let Some(candidates) = ht.map.get(&key) {
         let idx = candidates.partition_point(|&c| (c as usize) < pos);
-        let start = if idx > MAX_CANDIDATES { idx - MAX_CANDIDATES } else { 0 };
+        let start = idx.saturating_sub(MAX_CANDIDATES);
         for &cu in candidates[start..idx].iter().rev() {
             let cu = cu as usize;
             let diff = pos - cu;

@@ -180,7 +180,7 @@ pub fn compress(data: &[u8]) -> Vec<u8> {
                     entropy -= p * p.log2();
                 }
             }
-            lit_cost = (entropy.round() as i64).max(2).min(8);
+            lit_cost = (entropy.round() as i64).clamp(2, 8);
         }
 
         let mut tokens = Vec::new();
