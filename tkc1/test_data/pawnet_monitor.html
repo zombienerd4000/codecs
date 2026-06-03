@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="3">
+<title>~*~ pawnet system monitor ~*~</title>
+<style>
+body {
+    background-color: #000;
+    color: #0f0;
+    font-family: 'Comic Sans MS', 'MS Sans Serif', 'Courier New', monospace;
+    cursor: url('data:image/x-icon;base64,AAABAAEAEBAQAAEABAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'), auto;
+    margin: 0;
+    padding: 20px;
+    background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQYV2NkYGBoYmBg+M8ABYxMjAz/GZgYmBgYGAEAJUgBAcJmCPsAAAAASUVORK5CYII=');
+}
+
+.stars {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: -1;
+}
+
+.marquee {
+    white-space: nowrap;
+    overflow: hidden;
+    animation: marquee 15s linear infinite;
+}
+
+@keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+}
+
+.blink {
+    animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+    50% { opacity: 0; }
+}
+
+.pet {
+    font-size: 14px;
+    line-height: 1.2;
+    white-space: pre;
+    text-align: center;
+    color: #0f0;
+    text-shadow: 0 0 10px #0f0, 0 0 20px #0f0;
+}
+
+.pet-happy { color: #0f0; text-shadow: 0 0 10px #0f0, 0 0 20px #0f0; }
+.pet-party { color: #ff0; text-shadow: 0 0 10px #ff0, 0 0 20px #ff0; }
+.pet-normal { color: #0ff; text-shadow: 0 0 10px #0ff, 0 0 20px #0ff; }
+.pet-sleepy { color: #66f; text-shadow: 0 0 10px #66f, 0 0 20px #66f; }
+.pet-angry { color: #f00; text-shadow: 0 0 10px #f00, 0 0 20px #f00; }
+.pet-crying { color: #f0f; text-shadow: 0 0 10px #f0f, 0 0 20px #f0f; }
+
+.window {
+    border: 3px ridge #c0c0c0;
+    background: linear-gradient(180deg, #000080, #000060);
+    padding: 10px;
+    margin: 10px auto;
+    max-width: 600px;
+    box-shadow: 5px 5px 0px rgba(0,0,0,0.8);
+}
+
+.window-title {
+    background: linear-gradient(90deg, #000080, #1084d0);
+    color: white;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: bold;
+    margin: -10px -10px 10px -10px;
+    border-bottom: 2px solid #c0c0c0;
+    display: flex;
+    justify-content: space-between;
+}
+
+.bar-container {
+    background: #000;
+    border: 2px inset #808080;
+    height: 20px;
+    margin: 4px 0;
+    position: relative;
+}
+
+.bar-fill {
+    height: 100%;
+    transition: width 1s;
+    position: relative;
+}
+
+.bar-fill-green { background: linear-gradient(90deg, #0a0, #0f0); }
+.bar-fill-yellow { background: linear-gradient(90deg, #aa0, #ff0); }
+.bar-fill-red { background: linear-gradient(90deg, #a00, #f00); }
+.bar-fill-blue { background: linear-gradient(90deg, #00a, #00f); }
+.bar-fill-magenta { background: linear-gradient(90deg, #a0a, #f0f); }
+
+.bar-label {
+    position: absolute;
+    top: 2px;
+    left: 8px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: bold;
+    text-shadow: 1px 1px 0 #000;
+}
+
+.bar-pct {
+    position: absolute;
+    top: 2px;
+    right: 8px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: bold;
+    text-shadow: 1px 1px 0 #000;
+}
+
+.stat-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.stat-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid #333;
+    font-size: 13px;
+}
+
+.stat-label {
+    color: #aaa;
+    font-weight: bold;
+    width: 80px;
+}
+
+.stat-value {
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+}
+
+a {
+    color: #0ff;
+    text-decoration: underline;
+}
+
+a:visited { color: #f0f; }
+
+.construction {
+    text-align: center;
+    padding: 5px;
+    font-size: 11px;
+    color: #ff0;
+}
+
+.hit-counter {
+    text-align: center;
+    font-size: 20px;
+    color: #f00;
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 0 5px #f00;
+}
+
+.webring {
+    text-align: center;
+    font-size: 11px;
+    color: #aaa;
+    padding: 5px;
+    border-top: 1px solid #333;
+    margin-top: 10px;
+}
+
+.sparkline {
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: #0f0;
+}
+
+.status-text {
+    text-align: center;
+    font-style: italic;
+    color: #0f0;
+    font-size: 12px;
+    animation: blink 2s step-end infinite;
+}
+</style>
+</head>
+<body>
+
+<div class="stars"></div>
+
+<div class="marquee" style="color:#ff0;font-size:16px;font-weight:bold;margin-bottom:10px;">
+    ~*~ welcome to DESKTOP-OH64REK system monitor ~*~   ~*~ last updated: 2026-05-31 11:04:16 AM ~*~
+</div>
+
+<div class="window" style="max-width:400px;">
+    <div class="window-title">
+        <span>pet.exe</span>
+        <span>[<a href="#" style="color:#fff;">_</a>] [<a href="#" style="color:#fff;">[]</a>] [<a href="#" style="color:#fff;">X</a>]</span>
+    </div>
+    <div class="pet pet-normal">    /\___/\  
+   (  -_-  ) 
+   /       \ 
+  (         ) 
+   \_______/ </div>
+    <div class="status-text">~ www dot something dot com ~</div>
+</div>
+
+<div class="window">
+    <div class="window-title">
+        <span>system resources</span>
+        <span>pawnet v1.0</span>
+    </div>
+    <table class="stat-table">
+        <tr>
+            <td class="stat-label">CPU</td>
+            <td>
+                <div class="bar-container">
+                    <div class="bar-fill bar-fill-yellow" style="width:68.0%;"></div>
+                    <span class="bar-label">CPU</span>
+                    <span class="bar-pct">68.0%</span>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td class="stat-label">RAM</td>
+            <td>
+                <div class="bar-container">
+                    <div class="bar-fill bar-fill-green" style="width:41.6%;"></div>
+                    <span class="bar-label">RAM</span>
+                    <span class="bar-pct">41.6%</span>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td class="stat-label">DISK</td>
+            <td>
+                <div class="bar-container">
+                    <div class="bar-fill bar-fill-red" style="width:90.6%;"></div>
+                    <span class="bar-label">DISK</span>
+                    <span class="bar-pct">90.6%</span>
+                </div>
+            </td>
+        </tr>
+        
+        <tr>
+            <td class="stat-label">BAT</td>
+            <td>
+                <div class="bar-container">
+                    <div class="bar-fill bar-fill-green" style="width:33%;"></div>
+                    <span class="bar-label">BAT</span>
+                    <span class="bar-pct">33% [-]</span>
+                </div>
+            </td>
+        </tr>
+    </table>
+    <table class="stat-table">
+        <tr>
+            <td class="stat-label">RAM</td>
+            <td class="stat-value">6.5 GB / 15.7 GB</td>
+        </tr>
+        <tr>
+            <td class="stat-label">DISK</td>
+            <td class="stat-value">215 GB / 237 GB</td>
+        </tr>
+        
+        <tr>
+            <td class="stat-label">BATTERY</td>
+            <td class="stat-value">33% [-]</td>
+        </tr>
+        <tr>
+            <td class="stat-label">UPTIME</td>
+            <td class="stat-value">00:00:03</td>
+        </tr>
+        <tr>
+            <td class="stat-label">NET</td>
+            <td class="stat-value" style="font-size:11px;">down: 20.0 kb/s &nbsp;|&nbsp; up: 9.3 kb/s</td>
+        </tr>
+        <tr>
+            <td class="stat-label">TOTAL NET</td>
+            <td class="stat-value">442 MB / 63 MB</td>
+        </tr>
+    </table>
+</div>
+
+<div class="window" style="text-align:center;">
+    <div class="window-title">
+        <span>cpu sparkline</span>
+        <span>30s history</span>
+    </div>
+    <div class="sparkline">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▅█</div>
+</div>
+
+<div class="construction">
+    [ under construction ] ~ [ best viewed at 800x600 ] ~ [ <a href="#">add to favorites</a> ]
+</div>
+
+<div class="hit-counter">
+    you are visitor # 00044
+</div>
+
+<div class="webring">
+    [<a href="#">prev</a>] ~ pawnet webring ~ [<a href="#">next</a>] | <a href="#">geocities</a> | <a href="#">angelfire</a> | <a href="#">tripod</a> | <a href="#">expages</a>
+</div>
+
+<div style="text-align:center;font-size:10px;color:#444;margin-top:20px;">
+    powered by <a href="#" style="color:#666;">pawnet buddy engine</a> &copy; 2002-2026<br>
+    <span style="color:#333;">this page best viewed in <span style="color:#fff;">Netscape Navigator 4.7</span> or <span style="color:#fff;">Internet Explorer 5.0</span></span>
+</div>
+
+</body>
+</html>

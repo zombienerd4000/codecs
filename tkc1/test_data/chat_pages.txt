@@ -1,0 +1,53 @@
+List of all pages fetched from hikikomori.no and subdomains
+
+hikikomori.no (main domain)
+1. https://hikikomori.no/
+2. https://hikikomori.no/about/
+3. https://hikikomori.no/projects/
+4. https://hikikomori.no/projects/pawnet/
+5. https://hikikomori.no/projects/bokuramachi/
+6. https://hikikomori.no/projects/mycel/
+
+thorn.hikikomori.no (subdomain)
+1. https://thorn.hikikomori.no/
+2. https://thorn.hikikomori.no/about/
+3. https://thorn.hikikomori.no/docs/
+4. https://thorn.hikikomori.no/docs/spec/
+5. https://thorn.hikikomori.no/examples/
+6. https://thorn.hikikomori.no/wiki/ (placeholder)
+7. https://thorn.hikikomori.no/help/
+8. https://thorn.hikikomori.no/docs/quickstart.html
+9. https://thorn.hikikomori.no/docs/language-reference.html
+10. https://thorn.hikikomori.no/docs/stdlib.html
+11. https://thorn.hikikomori.no/docs/install.html
+12. https://thorn.hikikomori.no/docs/hello-world.html
+13. https://thorn.hikikomori.no/docs/tasks.html
+14. https://thorn.hikikomori.no/docs/error-handling.html
+15. https://thorn.hikikomori.no/docs/changelog.html
+16. https://thorn.hikikomori.no/docs/migration.html
+17. https://thorn.hikikomori.no/docs/RELEASE-NOTES.txt
+18. https://thorn.hikikomori.no/docs/api/
+19. https://thorn.hikikomori.no/faq/
+20. https://thorn.hikikomori.no/community/
+21. https://thorn.hikikomori.no/bugs/
+22. https://thorn.hikikomori.no/contact/
+23. https://thorn.hikikomori.no/legal/
+24. https://thorn.hikikomori.no/sponsor/
+25. https://thorn.hikikomori.no/thanks/
+26. https://thorn.hikikomori.no/resources/
+27. https://thorn.hikikomori.no/about/history/
+28. https://thorn.hikikomori.no/contribute/
+29. https://thorn.hikikomori.no/download
+30. https://thorn.hikikomori.no/security/
+
+Pages that returned 404 (not found)
+- https://hikikomori.no/sitemap.xml
+- https://hikikomori.no/robots.txt
+- https://thorn.hikikomori.no/forum/
+- https://thorn.hikikomori.no/download/compiler
+- https://thorn.hikikomori.no/download/stdlib
+- https://thorn.hikikomori.no/download/tooling
+- https://thorn.hikikomori.no/download/examples
+- https://forum.hikikomori.no
+
+All content from these pages has been fetched and stored.

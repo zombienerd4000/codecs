@@ -1,0 +1,13 @@
+[package]
+name = "tkc0"
+version = "0.1.0"
+description = "Transform-invariant LZ77 + rANS codec (tkc series mark 0)"
+edition = "2021"
+
+[dependencies]
+flate2 = "1"
+zstd = "0.13"
+
+[profile.release]
+opt-level = 3
+lto = true
