@@ -1,0 +1,13 @@
+[package]
+name = "stkc0"
+version = "0.2.0"
+description = "Transform-invariant LZ77 with deflate-style Huffman coding"
+edition = "2021"
+
+[dependencies]
+flate2 = "1"
+zstd = "0.13"
+
+[profile.release]
+opt-level = 3
+lto = true
