@@ -1,0 +1,8 @@
+improve ctkc0 compression ratio and speed. the end goal is to be noticeably better than gzip 1.14 -9 on both. currently 15/30 calgary/canterbury files beat gzip; total is -41691 bytes. gzip benchmark numbers are in README.md.
+
+rules:
+- commit and push every time you change any file, no matter how small
+- never stop working until imanotfound tells you to stop
+- run `ctkc0 t <file>` to test round-trip and see compressed size
+- the corpus is at stkc0/test_data/, readme has the full comparison table
+- if you need to check something in the source, just read the files

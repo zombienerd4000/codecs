@@ -149,11 +149,8 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
     if (a == 0x66 && b == 0x4C && c == 0x61 && d == 0x43) return fmt_raw();
     if (a == 0x0A && b >= 0x00 && b <= 0x05 && c == 0x01 && len >= 128) {
         uint8_t bpp = data[3];
-        uint16_t xmin = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
-        uint16_t ymin = (uint16_t)data[6] | ((uint16_t)data[7] << 8);
-        uint16_t xmax = (uint16_t)data[8] | ((uint16_t)data[9] << 8);
         uint16_t ymax = (uint16_t)data[10] | ((uint16_t)data[11] << 8);
-        uint16_t w = xmax - xmin + 1;
+        uint16_t ymin = (uint16_t)data[6] | ((uint16_t)data[7] << 8);
         uint16_t h = ymax - ymin + 1;
         uint16_t bytes_per_line = (uint16_t)data[66] | ((uint16_t)data[67] << 8);
         uint8_t planes = data[65];
