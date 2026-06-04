@@ -266,6 +266,16 @@ static uint32_t find_best_stride(const uint8_t *data, size_t len) {
         }
     }
 
+    uint32_t common[] = {64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536};
+    for (size_t i = 0; i < sizeof(common)/sizeof(common[0]) && nc < 100; i++) {
+        uint32_t s = common[i];
+        if (s >= min_stride && s <= max_stride) {
+            int dup = 0;
+            for (uint32_t j = 0; j < nc; j++) { if (candidates[j] == s) { dup = 1; break; } }
+            if (!dup) candidates[nc++] = s;
+        }
+    }
+
     if (nc == 0) return 0;
 
     uint32_t best_stride = 0;
@@ -703,20 +713,17 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
         for (int i = 0; i < 256; i++) if (block_freq[i] > max_block_freq) max_block_freq = block_freq[i];
 
         int low_entropy = (block_unique <= 32) || (max_block_freq * 2 > (uint32_t)block_len);
-        int64_t lit_cost = 8;
-        if (low_entropy) {
-            double total = (double)block_len;
-            double entropy = 0.0;
-            for (int i = 0; i < 256; i++) {
-                if (block_freq[i] > 0) {
-                    double p = (double)block_freq[i] / total;
-                    entropy -= p * log2(p);
-                }
+        double total = (double)block_len;
+        double entropy = 0.0;
+        for (int i = 0; i < 256; i++) {
+            if (block_freq[i] > 0) {
+                double p = (double)block_freq[i] / total;
+                entropy -= p * log2(p);
             }
-            lit_cost = (int64_t)(entropy + 0.5);
-            if (lit_cost < 2) lit_cost = 2;
-            if (lit_cost > 8) lit_cost = 8;
         }
+        int64_t lit_cost = (int64_t)(entropy + 0.5);
+        if (lit_cost < 2) lit_cost = 2;
+        if (lit_cost > 8) lit_cost = 8;
 
         TokenBuf tokens;
         tb_init(&tokens);
