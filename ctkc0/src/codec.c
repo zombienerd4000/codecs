@@ -713,17 +713,20 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
         for (int i = 0; i < 256; i++) if (block_freq[i] > max_block_freq) max_block_freq = block_freq[i];
 
         int low_entropy = (block_unique <= 32) || (max_block_freq * 2 > (uint32_t)block_len);
-        double total = (double)block_len;
-        double entropy = 0.0;
-        for (int i = 0; i < 256; i++) {
-            if (block_freq[i] > 0) {
-                double p = (double)block_freq[i] / total;
-                entropy -= p * log2(p);
+        int64_t lit_cost = 8;
+        if (low_entropy) {
+            double total = (double)block_len;
+            double entropy = 0.0;
+            for (int i = 0; i < 256; i++) {
+                if (block_freq[i] > 0) {
+                    double p = (double)block_freq[i] / total;
+                    entropy -= p * log2(p);
+                }
             }
+            lit_cost = (int64_t)(entropy + 0.5);
+            if (lit_cost < 2) lit_cost = 2;
+            if (lit_cost > 8) lit_cost = 8;
         }
-        int64_t lit_cost = (int64_t)(entropy + 0.5);
-        if (lit_cost < 2) lit_cost = 2;
-        if (lit_cost > 8) lit_cost = 8;
 
         TokenBuf tokens;
         tb_init(&tokens);
