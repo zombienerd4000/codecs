@@ -141,7 +141,38 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
     if (a == 0x4F && b == 0x67 && c == 0x67 && d == 0x53) return fmt_raw();
     if (a == 0x25 && b == 0x50 && c == 0x44 && d == 0x46) return fmt_raw();
 
-    if (a == 0x52 && b == 0x49 && c == 0x46 && d == 0x46) return fmt_audio();
+    if (a == 0x52 && b == 0x49 && c == 0x46 && d == 0x46) {
+        if (len >= 12 && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50) return fmt_raw();
+        return fmt_audio();
+    }
+
+    if (a == 0x66 && b == 0x4C && c == 0x61 && d == 0x43) return fmt_raw();
+    if (a == 0x0A && b >= 0x00 && b <= 0x05 && c == 0x01 && len >= 128) {
+        uint8_t bpp = data[3];
+        uint16_t xmin = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+        uint16_t ymin = (uint16_t)data[6] | ((uint16_t)data[7] << 8);
+        uint16_t xmax = (uint16_t)data[8] | ((uint16_t)data[9] << 8);
+        uint16_t ymax = (uint16_t)data[10] | ((uint16_t)data[11] << 8);
+        uint16_t w = xmax - xmin + 1;
+        uint16_t h = ymax - ymin + 1;
+        uint16_t bytes_per_line = (uint16_t)data[66] | ((uint16_t)data[67] << 8);
+        uint8_t planes = data[65];
+        uint32_t stride = (uint32_t)bytes_per_line * (uint32_t)planes;
+        uint32_t pixel_data = stride * (uint32_t)h;
+        FormatParams fp;
+        fp.hash_type = HASH_TYPE_HASH4;
+        fp.use_raw = 0;
+        fp.block_size_set = 0;
+        fp.block_size = 0;
+        if (stride > 0 && h > 0 && pixel_data > 0 && (size_t)(128 + pixel_data) <= len) {
+            fp.filter.type = (bpp == 1 && planes == 1) ? FILTER_ROW_DELTA_XOR : FILTER_ROW_DELTA;
+            fp.filter.stride = stride;
+        } else {
+            fp.filter.type = FILTER_NONE;
+            fp.filter.stride = 0;
+        }
+        return fp;
+    }
 
     if (a == 0x42 && b == 0x4D && len >= 30) {
         uint32_t w = (uint32_t)data[18] | ((uint32_t)data[19] << 8) | ((uint32_t)data[20] << 16) | ((uint32_t)data[21] << 24);
@@ -155,7 +186,7 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
         fp.block_size_set = 0;
         fp.block_size = 0;
         if (row_size > 0 && total_px > 0 && total_px <= len) {
-            fp.filter.type = FILTER_ROW_DELTA;
+            fp.filter.type = (bpp == 1) ? FILTER_ROW_DELTA_XOR : FILTER_ROW_DELTA;
             fp.filter.stride = row_size;
         } else {
             fp.filter.type = FILTER_NONE;
@@ -193,7 +224,7 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
         fp.block_size_set = 0;
         fp.block_size = 0;
         if (stride > 0 && h > 0 && pos + pixel_data <= len) {
-            fp.filter.type = FILTER_ROW_DELTA;
+            fp.filter.type = (b == 0x34) ? FILTER_ROW_DELTA_XOR : FILTER_ROW_DELTA;
             fp.filter.stride = stride;
         } else {
             fp.filter.type = FILTER_NONE;
@@ -418,15 +449,20 @@ static size_t vlq_byte_size(uint32_t v) {
 
 static void write_huff_table(BitWriter *w, const uint8_t *lens, size_t n) {
     size_t runs = 0;
-    size_t rle_run_bytes = 0;
+    size_t rle_est = 0;
     for (size_t i = 0; i < n; ) {
         runs++;
         size_t j = i + 1;
         while (j < n && lens[j] == lens[i]) j++;
-        rle_run_bytes += vlq_byte_size((uint32_t)(j - i));
+        uint32_t run_len = (uint32_t)(j - i);
+        if (run_len <= 3) {
+            rle_est += 1;
+        } else {
+            rle_est += 1 + vlq_byte_size(run_len - 3);
+        }
         i = j;
     }
-    size_t rle_bytes = vlq_byte_size((uint32_t)runs) + rle_run_bytes + 1;
+    size_t rle_bytes = vlq_byte_size((uint32_t)runs) + (rle_est + 4) / 8;
 
     if (rle_bytes < (n + 1) / 2) {
         bw_write_bit(w, 0);
@@ -434,7 +470,13 @@ static void write_huff_table(BitWriter *w, const uint8_t *lens, size_t n) {
         for (size_t i = 0; i < n; ) {
             size_t j = i + 1;
             while (j < n && lens[j] == lens[i]) j++;
-            bw_write_vlq(w, (uint32_t)(j - i));
+            uint32_t run_len = (uint32_t)(j - i);
+            if (run_len <= 3) {
+                bw_write_bits(w, run_len - 1, 2);
+            } else {
+                bw_write_bits(w, 3, 2);
+                bw_write_vlq(w, run_len - 3);
+            }
             bw_write_bits(w, lens[i], 4);
             i = j;
         }
@@ -469,7 +511,13 @@ static void read_huff_table(BitReader *r, Huffman *huff, size_t n) {
         uint32_t runs = br_read_vlq(r);
         size_t pos = 0;
         for (uint32_t ri = 0; ri < runs && pos < n; ri++) {
-            uint32_t run_len = br_read_vlq(r);
+            uint32_t prefix = br_read_bits(r, 2);
+            uint32_t run_len;
+            if (prefix == 3) {
+                run_len = br_read_vlq(r) + 3;
+            } else {
+                run_len = prefix + 1;
+            }
             uint8_t len_val = (uint8_t)br_read_bits(r, 4);
             for (uint32_t j = 0; j < run_len && pos < n; j++) {
                 lens[pos++] = len_val;

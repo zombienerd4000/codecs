@@ -12,7 +12,7 @@ a collection of compression codecs built while learning how compression works.
 | **tkc2** | rust | - | xor/add transforms |
 | **tkc3** | rust | 0.2.0 | 4-byte flat array hash table |
 | **stkc0** | rust | 0.2.0 | scan-based hash selection (3 or 4 byte) |
-| **ctkc0** | c | 0.2.0 | c port of stkc0 (same format, bit-identical decompression) |
+| **ctkc0** | c | 0.7.0 | c port with RLE huffman tables, XOR RowDelta, bitmap detection, vs gzip (19/30 files win) |
 
 ## tkc3
 
@@ -133,16 +133,68 @@ shifting some files from HASH3 to HASH4.
 
 ## ctkc0
 
-ctkc0 is a c99 port of stkc0 with no external dependencies. it uses the
-exact same bitstream format (MAGIC/MAGIC_RAW, filter bytes, VLQ, Huffman
-tables) so compressed data is interchangeable between the two
-implementations.
+ctkc0 is a c99 compressor with no external dependencies, evolved from the
+stkc0/tkc3 codecs. it uses a custom bitstream format (not deflate compatible)
+with RLE-compressed Huffman tables, run-length encoded match tokens, and
+prefilters (RowDelta, XOR RowDelta, Delta16) for specific data types.
 
-all 30 calgary/canterbury corpus files roundtrip correctly in both
-directions and cross-decompression (rust-compressed opened by c, and
-vice versa) passes every file. compression ratios match the rust version
-within 1-2% on most files; the remaining differences are from floating
-point rounding in entropy estimation and integer width edge cases.
+target: beat gzip on all 30 calgary/canterbury corpus files in both ratio
+and speed. currently 19/30 files beat gzip; remaining gaps are within 1.5%.
+
+### compression ratios (calgary/canterbury corpus)
+
+| file | ctkc0 |
+|------|-------|
+| alice29.txt | 53477 (36.0%) |
+| asyoulik.txt | 48766 (39.0%) |
+| bib | 34733 (31.2%) |
+| book1 | 313326 (40.8%) |
+| book2 | 204804 (33.5%) |
+| cp.html | 7955 (32.3%) |
+| fields.c | 3156 (28.3%) |
+| geo | 68320 (66.7%) |
+| grammar.lsp | 1238 (33.3%) |
+| kennedy.xls | 210471 (20.4%) |
+| lcet10.txt | 141672 (33.8%) |
+| news | 142752 (37.9%) |
+| obj1 | 10325 (48.0%) |
+| obj2 | 81743 (33.1%) |
+| pi.txt | 424777 (42.5%) |
+| pic | 54877 (10.7%) |
+| plrabn12.txt | 193612 (41.1%) |
+| paper1 | 18514 (34.8%) |
+| paper2 | 29595 (36.0%) |
+| paper3 | 17985 (38.7%) |
+| paper4 | 5540 (41.7%) |
+| paper5 | 5009 (41.9%) |
+| paper6 | 13410 (35.2%) |
+| progc | 13415 (33.9%) |
+| progl | 16235 (22.7%) |
+| progp | 11267 (22.8%) |
+| ptt5 | 54877 (10.7%) |
+| sum | 12845 (33.6%) |
+| trans | 18956 (20.2%) |
+| xargs.1 | 1758 (41.6%) |
+
+key improvements vs stkc0: RLE Huffman table encoding (saves ~100-150 bytes
+per block on most files), XOR RowDelta prefilter for 1-bit bitmap data (PBM,
+P4, 1-bit BMP), generic stride detection for zero/FF-heavy data, hash
+function changed from xor-based to multiplicative golden ratio.
+
+### building
+
+```
+cd ctkc0
+
+# clang/gcc:
+clang -O3 -std=c99 -Wall -Wextra -Wpedantic -lm -o ctkc0 src/main.c src/bit.c src/huff.c src/lz.c src/codec.c
+
+# msvc (from vs dev shell):
+cl /O2 /std:c11 /Fe:ctkc0.exe src/main.c src/bit.c src/huff.c src/lz.c src/codec.c
+
+# test round-trip on all corpus files:
+for %f in (..\stkc0\test_data\*) do ctkc0 t %f
+```
 
 ## building
 

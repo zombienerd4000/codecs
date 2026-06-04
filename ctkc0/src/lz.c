@@ -1,6 +1,18 @@
 #include "lz.h"
 #include <string.h>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+static uint32_t my_ctzll(uint64_t x) {
+    unsigned long idx;
+    _BitScanForward64(&idx, x);
+    return (uint32_t)idx;
+}
+#define CTZLL(x) my_ctzll(x)
+#else
+#define CTZLL(x) __builtin_ctzll(x)
+#endif
+
 void tb_init(TokenBuf *tb) {
     tb->data = NULL;
     tb->count = 0;
@@ -142,7 +154,7 @@ static void find_in_slice(const uint8_t *data, size_t pos, const uint32_t *slice
             uint64_t va = *(const uint64_t *)(data + pos + ln);
             uint64_t vb = *(const uint64_t *)(data + cu + ln);
             if (va != vb) {
-                ln += (va ^ vb) ? (__builtin_ctzll(va ^ vb) / 8) : 0;
+                ln += (va ^ vb) ? (CTZLL(va ^ vb) / 8) : 0;
                 break;
             }
             ln += 8;
