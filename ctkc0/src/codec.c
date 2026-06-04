@@ -427,6 +427,8 @@ static uint16_t distance_to_code(uint32_t dist, uint32_t *extra, int *overflow) 
 }
 
 static int g_is_text_block = 0;
+const uint8_t *g_match_main_lens = NULL;
+const uint8_t *g_match_dist_lens = NULL;
 
 int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost) {
     uint32_t len_extra_val;
@@ -454,25 +456,33 @@ int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost) {
         extra_dist_bits = dist_extra[dc];
     }
 
-    int main_sym_bits = 8;
-    if (g_is_text_block && lit_cost >= 8) main_sym_bits = 9;
+    int main_sym_bits, dist_code_bits;
 
-    int dist_code_bits;
-    if (lit_cost >= 8 && g_is_text_block) {
-        if (dc <= 1) dist_code_bits = 3;
-        else if (dc <= 3) dist_code_bits = 3;
-        else if (dc <= 7) dist_code_bits = 4;
-        else if (dc <= 15) dist_code_bits = 5;
-        else if (dc <= 23) dist_code_bits = 6;
-        else dist_code_bits = 7;
-    } else if (lit_cost <= 4) {
-        dist_code_bits = 5;
+    if (g_match_main_lens != NULL) {
+        int actual = g_match_main_lens[lc];
+        main_sym_bits = actual > 0 ? actual : 8;
+        int d_actual = g_match_dist_lens[dc];
+        dist_code_bits = d_actual > 0 ? d_actual : 5;
     } else {
-        if (dc <= 3) dist_code_bits = 4;
-        else if (dc <= 7) dist_code_bits = 4;
-        else if (dc <= 15) dist_code_bits = 5;
-        else if (dc <= 23) dist_code_bits = 5;
-        else dist_code_bits = 6;
+        main_sym_bits = 8;
+        if (g_is_text_block && lit_cost >= 8) main_sym_bits = 9;
+
+        if (lit_cost >= 8 && g_is_text_block) {
+            if (dc <= 1) dist_code_bits = 3;
+            else if (dc <= 3) dist_code_bits = 3;
+            else if (dc <= 7) dist_code_bits = 4;
+            else if (dc <= 15) dist_code_bits = 5;
+            else if (dc <= 23) dist_code_bits = 6;
+            else dist_code_bits = 7;
+        } else if (lit_cost <= 4) {
+            dist_code_bits = 5;
+        } else {
+            if (dc <= 3) dist_code_bits = 4;
+            else if (dc <= 7) dist_code_bits = 4;
+            else if (dc <= 15) dist_code_bits = 5;
+            else if (dc <= 23) dist_code_bits = 5;
+            else dist_code_bits = 6;
+        }
     }
 
     return main_sym_bits + extra_len_bits + dist_code_bits + extra_dist_bits;
@@ -780,48 +790,153 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
             ht_build(&htable, ext_data, ext_len, ht);
             size_t n = ext_len;
 
-            while (pos < n) {
-                Token tok;
-                if (ht_find_match(&htable, ext_data, n, pos, lit_cost, &tok)) {
-                    uint32_t ln = tok.ln;
-                    uint32_t off = tok.off;
-                    int skip;
-                    if (low_entropy) {
-                        skip = lazy_skip_cost_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
+            if (!g_is_text_block) {
+                uint32_t *p0_main = calloc(MAIN_SYMS, sizeof(uint32_t));
+                uint32_t *p0_dist = calloc(DIST_CODES, sizeof(uint32_t));
+                {
+                    size_t p0 = block_start - win_start;
+                    while (p0 < n) {
+                        Token tok;
+                        if (ht_find_match(&htable, ext_data, n, p0, lit_cost, &tok)) {
+                            uint32_t ln = tok.ln;
+                            uint32_t off = tok.off;
+                            int skip;
+                            if (low_entropy) {
+                                skip = lazy_skip_cost_depth(ext_data, n, p0, ln, off, &htable, lit_cost);
+                            } else {
+                                int binary_count = 0;
+                                for (int i = 0; i < 256; i++) {
+                                    if (is_binary(i)) binary_count += block_freq[i];
+                                }
+                                int uniform = (max_block_freq * 3 > (uint32_t)block_len);
+                                int margin = (!uniform && binary_count * 10 > (int)block_len) ? 4 : 8;
+                                skip = lazy_skip_depth(ext_data, n, p0, ln, off, &htable, lit_cost, margin);
+                            }
+                            if (skip > 0) {
+                                for (int i = 0; i < skip; i++) p0_main[ext_data[p0 + i]]++;
+                                p0 += skip;
+                                continue;
+                            }
+                            uint16_t sym = match_sym(ln);
+                            p0_main[sym]++;
+                            uint32_t dummy_extra;
+                            int dummy_overflow;
+                            uint16_t d_code = distance_to_code(off, &dummy_extra, &dummy_overflow);
+                            p0_dist[d_code]++;
+                            p0 += ln;
+                        } else {
+                            uint8_t b = ext_data[p0];
+                            size_t run = 1;
+                            while (p0 + run < n && ext_data[p0 + run] == b) run++;
+                            for (size_t i = 0; i < run; i++) p0_main[b]++;
+                            p0 += run;
+                        }
+                    }
+                }
+                Huffman p0_main_huff, p0_dist_huff;
+                huff_init(&p0_main_huff, MAIN_SYMS);
+                huff_init(&p0_dist_huff, DIST_CODES);
+                huff_build(&p0_main_huff, p0_main);
+                huff_build(&p0_dist_huff, p0_dist);
+                g_match_main_lens = p0_main_huff.len;
+                g_match_dist_lens = p0_dist_huff.len;
+                free(p0_main);
+                free(p0_dist);
+
+                pos = block_start - win_start;
+                while (pos < n) {
+                    Token tok;
+                    if (ht_find_match(&htable, ext_data, n, pos, lit_cost, &tok)) {
+                        uint32_t ln = tok.ln;
+                        uint32_t off = tok.off;
+                        int skip;
+                        if (low_entropy) {
+                            skip = lazy_skip_cost_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
+                        } else {
+                            int binary_count = 0;
+                            for (int i = 0; i < 256; i++) {
+                                if (is_binary(i)) binary_count += block_freq[i];
+                            }
+                            int uniform = (max_block_freq * 3 > (uint32_t)block_len);
+                            int margin = (!uniform && binary_count * 10 > (int)block_len) ? 4 : 8;
+                            skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost, margin);
+                        }
+                        if (skip > 0) {
+                            for (int i = 0; i < skip; i++) {
+                                tb_push(&tokens, 0, ext_data[pos + i], 0, 0);
+                                main_freq[ext_data[pos + i]]++;
+                            }
+                            pos += skip;
+                            continue;
+                        }
+                        tb_push(&tokens, 1, 0, off, ln);
+                        uint16_t sym = match_sym(ln);
+                        main_freq[sym]++;
+                        uint32_t dummy_extra;
+                        int dummy_overflow;
+                        uint16_t d_code = distance_to_code(off, &dummy_extra, &dummy_overflow);
+                        dist_freq[d_code]++;
+                        pos += ln;
                     } else {
-                        int binary_count = 0;
-                        for (int i = 0; i < 256; i++) {
-                            if (is_binary(i)) binary_count += block_freq[i];
+                        uint8_t b = ext_data[pos];
+                        size_t run = 1;
+                        while (pos + run < n && ext_data[pos + run] == b) run++;
+                        for (size_t i = 0; i < run; i++) {
+                            tb_push(&tokens, 0, b, 0, 0);
+                            main_freq[b]++;
                         }
-                        int uniform = (max_block_freq * 3 > (uint32_t)block_len);
-                        int margin = (!uniform && binary_count * 10 > (int)block_len) ? 4 : 8;
-                        skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost, margin);
+                        pos += run;
                     }
-                    if (skip > 0) {
-                        for (int i = 0; i < skip; i++) {
-                            tb_push(&tokens, 0, ext_data[pos + i], 0, 0);
-                            main_freq[ext_data[pos + i]]++;
+                }
+                g_match_main_lens = NULL;
+                g_match_dist_lens = NULL;
+                huff_free(&p0_main_huff);
+                huff_free(&p0_dist_huff);
+            } else {
+                pos = block_start - win_start;
+                while (pos < n) {
+                    Token tok;
+                    if (ht_find_match(&htable, ext_data, n, pos, lit_cost, &tok)) {
+                        uint32_t ln = tok.ln;
+                        uint32_t off = tok.off;
+                        int skip;
+                        if (low_entropy) {
+                            skip = lazy_skip_cost_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
+                        } else {
+                            int binary_count = 0;
+                            for (int i = 0; i < 256; i++) {
+                                if (is_binary(i)) binary_count += block_freq[i];
+                            }
+                            int uniform = (max_block_freq * 3 > (uint32_t)block_len);
+                            int margin = (!uniform && binary_count * 10 > (int)block_len) ? 4 : 8;
+                            skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost, margin);
                         }
-                        pos += skip;
-                        continue;
+                        if (skip > 0) {
+                            for (int i = 0; i < skip; i++) {
+                                tb_push(&tokens, 0, ext_data[pos + i], 0, 0);
+                                main_freq[ext_data[pos + i]]++;
+                            }
+                            pos += skip;
+                            continue;
+                        }
+                        tb_push(&tokens, 1, 0, off, ln);
+                        uint16_t sym = match_sym(ln);
+                        main_freq[sym]++;
+                        uint32_t dummy_extra;
+                        int dummy_overflow;
+                        uint16_t d_code = distance_to_code(off, &dummy_extra, &dummy_overflow);
+                        dist_freq[d_code]++;
+                        pos += ln;
+                    } else {
+                        uint8_t b = ext_data[pos];
+                        size_t run = 1;
+                        while (pos + run < n && ext_data[pos + run] == b) run++;
+                        for (size_t i = 0; i < run; i++) {
+                            tb_push(&tokens, 0, b, 0, 0);
+                            main_freq[b]++;
+                        }
+                        pos += run;
                     }
-                    tb_push(&tokens, 1, 0, off, ln);
-                    uint16_t sym = match_sym(ln);
-                    main_freq[sym]++;
-                    uint32_t dummy_extra;
-                    int dummy_overflow;
-                    uint16_t d_code = distance_to_code(off, &dummy_extra, &dummy_overflow);
-                    dist_freq[d_code]++;
-                    pos += ln;
-                } else {
-                    uint8_t b = ext_data[pos];
-                    size_t run = 1;
-                    while (pos + run < n && ext_data[pos + run] == b) run++;
-                    for (size_t i = 0; i < run; i++) {
-                        tb_push(&tokens, 0, b, 0, 0);
-                        main_freq[b]++;
-                    }
-                    pos += run;
                 }
             }
             ht_free(&htable);
