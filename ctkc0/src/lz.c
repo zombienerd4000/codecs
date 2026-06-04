@@ -140,15 +140,21 @@ static void find_in_slice(const uint8_t *data, size_t pos, const uint32_t *slice
                           int64_t *best_sav, int64_t lit_cost, uint32_t min_match) {
     size_t idx = 0;
     while (idx < slice_len && slice[idx] < (uint32_t)pos) idx++;
-    size_t iter_start = (idx > MAX_CANDIDATES) ? idx - MAX_CANDIDATES : 0;
+    size_t n_candidates = idx;
+    size_t iter_start = (n_candidates > MAX_CANDIDATES) ? n_candidates - MAX_CANDIDATES : 0;
+    if (n_candidates == iter_start) return;
 
-    for (size_t ci = idx; ci > iter_start; ) {
+    uint32_t pos_bytes = *(const uint32_t *)(data + pos);
+
+    for (size_t ci = n_candidates; ci > iter_start; ) {
         ci--;
         size_t cu = slice[ci];
         size_t diff = pos - cu;
         if (diff > WINDOW) break;
 
-        size_t ln = 0;
+        if ((*(const uint32_t *)(data + cu) & 0x00FFFFFF) != (pos_bytes & 0x00FFFFFF)) continue;
+
+        size_t ln = 3;
         size_t max_ln = max_len;
         while (ln + 8 <= max_ln) {
             uint64_t va = *(const uint64_t *)(data + pos + ln);

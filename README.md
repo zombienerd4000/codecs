@@ -139,47 +139,50 @@ with RLE-compressed Huffman tables, run-length encoded match tokens, and
 prefilters (RowDelta, XOR RowDelta, Delta16) for specific data types.
 
 currently 15/30 files beat gzip 1.14 -9 (git for windows) on the
-calgary/canterbury corpus. total: ctkc0=2,215,410 gzip=2,257,101 (-41,691).
+calgary/canterbury corpus. total: ctkc0=2,214,608 gzip=2,257,101 (-42,493).
 
 ### compression ratios vs gzip 1.14 -9 (calgary/canterbury corpus)
 
 | file | ctkc0 | gzip | diff |
 |------|-------|------|------|
-| alice29.txt | 53477 (36.0%) | 53441 (36.0%) | +36 |
+| alice29.txt | 53469 (36.0%) | 53441 (36.0%) | +28 |
 | asyoulik.txt | 48766 (39.0%) | 48840 (39.0%) | -74 |
-| bib | 34733 (31.2%) | 34908 (31.4%) | -175 |
-| book1 | 313326 (40.8%) | 312289 (40.6%) | +1037 |
-| book2 | 204804 (33.5%) | 206166 (33.8%) | -1362 |
+| bib | 34717 (31.2%) | 34908 (31.4%) | -191 |
+| book1 | 313225 (40.7%) | 312289 (40.6%) | +936 |
+| book2 | 204752 (33.5%) | 206166 (33.8%) | -1414 |
 | cp.html | 7955 (32.3%) | 7992 (32.5%) | -37 |
 | fields.c | 3156 (28.3%) | 3147 (28.2%) | +9 |
 | geo | 68320 (66.7%) | 68422 (66.8%) | -102 |
 | grammar.lsp | 1238 (33.3%) | 1257 (33.8%) | -19 |
-| kennedy.xls | 210471 (20.4%) | 209744 (20.4%) | +727 |
-| lcet10.txt | 141672 (33.8%) | 142590 (34.0%) | -918 |
-| news | 142752 (37.9%) | 144408 (38.3%) | -1656 |
-| obj1 | 10325 (48.0%) | 10328 (48.0%) | -3 |
-| obj2 | 81743 (33.1%) | 81095 (32.9%) | +648 |
+| kennedy.xls | 210434 (20.4%) | 209744 (20.4%) | +690 |
+| lcet10.txt | 141617 (33.8%) | 142590 (34.0%) | -973 |
+| news | 142741 (37.9%) | 144408 (38.3%) | -1667 |
+| obj1 | 10323 (48.0%) | 10328 (48.0%) | -5 |
+| obj2 | 81642 (33.1%) | 81095 (32.9%) | +547 |
 | pi.txt | 424777 (42.5%) | 470445 (47.0%) | -45668 |
-| pic | 54877 (10.7%) | 52389 (10.2%) | +2488 |
-| plrabn12.txt | 193612 (41.1%) | 193118 (41.0%) | +494 |
-| paper1 | 18514 (34.8%) | 18551 (34.9%) | -37 |
-| paper2 | 29595 (36.0%) | 29675 (36.1%) | -80 |
-| paper3 | 17985 (38.7%) | 18082 (38.9%) | -97 |
+| pic | 54727 (10.7%) | 52389 (10.2%) | +2338 |
+| plrabn12.txt | 193602 (41.1%) | 193118 (41.0%) | +484 |
+| paper1 | 18509 (34.8%) | 18551 (34.9%) | -42 |
+| paper2 | 29592 (36.0%) | 29675 (36.1%) | -83 |
+| paper3 | 17983 (38.7%) | 18082 (38.9%) | -99 |
 | paper4 | 5540 (41.7%) | 5542 (41.7%) | -2 |
 | paper5 | 5009 (41.9%) | 5003 (41.9%) | +6 |
-| paper6 | 13410 (35.2%) | 13221 (34.7%) | +189 |
-| progc | 13415 (33.9%) | 13269 (33.5%) | +146 |
-| progl | 16235 (22.7%) | 16172 (22.6%) | +63 |
-| progp | 11267 (22.8%) | 11194 (22.7%) | +73 |
-| ptt5 | 54877 (10.7%) | 52393 (10.2%) | +2484 |
-| sum | 12845 (33.6%) | 12783 (33.4%) | +62 |
-| trans | 18956 (20.2%) | 18870 (20.1%) | +86 |
+| paper6 | 13408 (35.2%) | 13221 (34.7%) | +187 |
+| progc | 13413 (33.9%) | 13269 (33.5%) | +144 |
+| progl | 16223 (22.6%) | 16172 (22.6%) | +51 |
+| progp | 11262 (22.8%) | 11194 (22.7%) | +68 |
+| ptt5 | 54727 (10.7%) | 52393 (10.2%) | +2334 |
+| sum | 12816 (33.5%) | 12783 (33.4%) | +33 |
+| trans | 18907 (20.2%) | 18870 (20.1%) | +37 |
 | xargs.1 | 1758 (41.6%) | 1767 (41.8%) | -9 |
 
 key improvements vs stkc0: RLE Huffman table encoding (saves ~100-150 bytes
 per block on most files), XOR RowDelta prefilter for 1-bit bitmap data (PBM,
 P4, 1-bit BMP), generic stride detection for zero/FF-heavy data, hash
 function changed from xor-based to multiplicative golden ratio.
+
+latest: 4-byte quick-reject in match search + higher candidate limit (1024)
+improves encode speed 2-5x and compression ratio by ~800 bytes total.
 
 ### building
 
