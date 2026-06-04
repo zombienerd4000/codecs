@@ -112,21 +112,61 @@ fn distance_to_code(dist: u32) -> (u16, u32, bool) {
     }
 }
 
+fn detect_magic(data: &[u8]) -> Option<HashType> {
+    let n = data.len();
+    if n < 4 { return None; }
+    let h = [data[0], data[1], data[2], data[3]];
+    match h {
+        [0x7F, 0x45, 0x4C, 0x46] => Some(HashType::Hash3), // ELF
+        [0x4D, 0x5A, _, _] => Some(HashType::Hash3), // PE
+        [0x50, 0x4B, 0x03, 0x04] => Some(HashType::Hash3), // ZIP
+        [0x1F, 0x8B, _, _] => Some(HashType::Hash3), // GZIP
+        [0x89, 0x50, 0x4E, 0x47] => Some(HashType::Hash3), // PNG
+        [0xFF, 0xD8, _, _] => Some(HashType::Hash3), // JPEG
+        [0x47, 0x49, 0x46, _] => Some(HashType::Hash3), // GIF
+        [0x25, 0x50, 0x44, 0x46] => Some(HashType::Hash3), // PDF
+        [0x50, 0x35, _, _] | [0x50, 0x36, _, _] | [0x50, 0x34, _, _] => Some(HashType::Hash4), // PGM/PPM/PBM
+        _ => None,
+    }
+}
+
+fn is_binary(b: u8) -> bool {
+    b == 0 || (b < 0x09) || b == 0x0B || b == 0x0C || (b > 0x0D && b < 0x20) || b == 0x7F || (b >= 0x80 && b <= 0x9F)
+}
+
 fn detect_hash_type(data: &[u8]) -> HashType {
-    let sample = &data[..data.len().min(4096)];
+    if let Some(ht) = detect_magic(data) {
+        return ht;
+    }
+    let n = data.len();
     let mut binary_chars = 0usize;
     let mut seen = [false; 256];
     let mut unique = 0usize;
-    for &b in sample {
-        if !seen[b as usize] {
-            seen[b as usize] = true;
-            unique += 1;
+    let mut total = 0usize;
+    if n <= 4096 {
+        for &b in data {
+            if !seen[b as usize] { seen[b as usize] = true; unique += 1; }
+            if is_binary(b) { binary_chars += 1; }
         }
-        if b == 0 || (b < 0x09) || b == 0x0B || b == 0x0C || (b > 0x0D && b < 0x20) || b == 0x7F || (b >= 0x80 && b <= 0x9F) {
-            binary_chars += 1;
+        total = n;
+    } else {
+        let positions = [0, n / 4, n / 2, n * 3 / 4];
+        for &pos in &positions {
+            let end = (pos + 1024).min(n);
+            for &b in &data[pos..end] {
+                if !seen[b as usize] { seen[b as usize] = true; unique += 1; }
+                if is_binary(b) { binary_chars += 1; }
+            }
+            total += end - pos;
         }
     }
-    if unique > 100 || binary_chars > sample.len() / 20 { HashType::Hash3 } else { HashType::Hash4 }
+    if binary_chars > total * 9 / 10 && unique < 50 {
+        HashType::Hash4
+    } else if unique > 100 || binary_chars > total / 20 {
+        HashType::Hash3
+    } else {
+        HashType::Hash4
+    }
 }
 
 pub fn compress(data: &[u8]) -> Vec<u8> {

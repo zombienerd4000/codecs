@@ -77,14 +77,16 @@ faster on binary-heavy ones (kennedy, geo).
 ## stkc0
 
 stkc0 is a copy of tkc3 with a scan-based hash strategy selection. it
-samples the first 4KB of input and picks a 3-byte hash for binary data
-(>200 unique bytes or >5% non-printable chars) or a 4-byte hash for
-text-like data. this helps compress binary files where 3-byte hash finds
-more matches, while keeping the 4-byte hash for text where precision matters.
+samples 4x 1KB chunks at 0%, 25%, 50%, 75% of the file (or the whole file
+if <= 4KB) and picks a 3-byte hash for binary data or 4-byte hash for
+text-like data. also checks magic bytes (ELF, PE, ZIP, PNG, JPEG, PDF,
+PGM, etc.) for known format hints.
 
-the 3-byte hash uses n-2 entries (vs n-3 for 4-byte), which is key: for
-binary data, the extra hash slot creates more match candidates from every
-position boundary, catching short matches that the 4-byte hash skips.
+the 3-byte hash uses n-2 entries (vs n-3 for 4-byte), which creates more
+match candidates from every position boundary, catching short matches in
+binary data that the 4-byte hash misses. includes a special case for
+uniform binary data (low unique bytes + high binary %) which uses HASH4
+to avoid over-matching on images with repeated pixel values.
 
 ### current performance vs gzip -9 (calgary corpus)
 
@@ -107,21 +109,20 @@ compression ratio:
 | obj1 | 10389 (48.3%) | 10318 (48.0%) | +71b | -314b |
 | obj2 | 81850 (33.2%) | 81493 (33.0%) | +357b | -2128b |
 | pi.txt | 425085 (42.5%) | 470465 (47.0%) | -45380b | +0 |
-| pic | 57501 (11.2%) | 53717 (10.5%) | +3784b | +1719b |
+| pic | 55782 (10.9%) | 53717 (10.5%) | +2065b | +0 |
 | plrabn12.txt | 193887 (41.2%) | 193287 (41.0%) | +600b | +0 |
 | paper1 | 18657 (35.1%) | 18541 (34.9%) | +116b | +0 |
 | progc | 13557 (34.2%) | 13357 (33.7%) | +200b | +0 |
 | progl | 16371 (22.8%) | 16180 (22.6%) | +191b | +0 |
 | progp | 11396 (23.1%) | 11196 (22.7%) | +200b | +0 |
-| ptt5 | 57501 (11.2%) | 53717 (10.5%) | +3784b | +1719b |
+| ptt5 | 55782 (10.9%) | 53717 (10.5%) | +2065b | +0 |
 | sum | 12903 (33.7%) | 12951 (33.9%) | -48b | -454b |
 | trans | 19103 (20.4%) | 18945 (20.2%) | +158b | -81b |
 | xargs.1 | 1870 (44.2%) | 1748 (41.4%) | +122b | +0 |
 
-vs tkc3 (4-byte only): geo -1385b, obj1 -314b, obj2 -2128b, sum -454b,
-trans -81b = -4362b improvement on binary files. regressions: pic +1719b,
-ptt5 +1719b, kennedy +269b = +3707b total loss. net: -655b across the
-corpus.
+vs tkc3: geo -1385b, obj1 -314b, obj2 -2128b, sum -454b, trans -81b =
+-4362b improvement. only kennedy regresses at +269b. net: -4093b across
+the corpus.
 
 ## building (rust codecs)
 
