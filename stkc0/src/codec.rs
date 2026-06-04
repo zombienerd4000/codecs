@@ -112,32 +112,85 @@ fn distance_to_code(dist: u32) -> (u16, u32, bool) {
     }
 }
 
-fn detect_magic(data: &[u8]) -> Option<HashType> {
-    let n = data.len();
-    if n < 4 { return None; }
-    let h = [data[0], data[1], data[2], data[3]];
-    match h {
-        [0x7F, 0x45, 0x4C, 0x46] => Some(HashType::Hash3), // ELF
-        [0x4D, 0x5A, _, _] => Some(HashType::Hash3), // PE
-        [0x50, 0x4B, 0x03, 0x04] => Some(HashType::Hash3), // ZIP
-        [0x1F, 0x8B, _, _] => Some(HashType::Hash3), // GZIP
-        [0x89, 0x50, 0x4E, 0x47] => Some(HashType::Hash3), // PNG
-        [0xFF, 0xD8, _, _] => Some(HashType::Hash3), // JPEG
-        [0x47, 0x49, 0x46, _] => Some(HashType::Hash3), // GIF
-        [0x25, 0x50, 0x44, 0x46] => Some(HashType::Hash3), // PDF
-        [0x50, 0x35, _, _] | [0x50, 0x36, _, _] | [0x50, 0x34, _, _] => Some(HashType::Hash4), // PGM/PPM/PBM
-        _ => None,
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Filter {
+    None,
+    Delta16LE,
+}
+
+#[derive(Debug, Clone)]
+struct FormatParams {
+    hash_type: HashType,
+    use_raw: bool,
+    block_size: Option<usize>,
+    filter: Filter,
+}
+
+impl FormatParams {
+    fn raw() -> Self {
+        FormatParams { hash_type: HashType::Hash4, use_raw: true, block_size: None, filter: Filter::None }
     }
+    fn audio() -> Self {
+        FormatParams { hash_type: HashType::Hash3, use_raw: false, block_size: Some(65536), filter: Filter::Delta16LE }
+    }
+    fn image() -> Self {
+        FormatParams { hash_type: HashType::Hash4, use_raw: false, block_size: None, filter: Filter::None }
+    }
+    fn exe() -> Self {
+        FormatParams { hash_type: HashType::Hash3, use_raw: false, block_size: Some(262144), filter: Filter::None }
+    }
+    fn default(ht: HashType) -> Self {
+        FormatParams { hash_type: ht, use_raw: false, block_size: None, filter: Filter::None }
+    }
+}
+
+fn detect_magic(data: &[u8]) -> Option<FormatParams> {
+    if data.len() < 4 { return None; }
+    let [a, b, c, d] = [data[0], data[1], data[2], data[3]];
+
+    // archives / compressed -> raw passthrough
+    if a == 0x50 && b == 0x4B && c == 0x03 && d == 0x04 { return Some(FormatParams::raw()); } // ZIP
+    if a == 0x1F && b == 0x8B { return Some(FormatParams::raw()); } // GZIP
+    if a == 0x42 && b == 0x5A { return Some(FormatParams::raw()); } // BZ2
+    if a == 0x28 && b == 0xB5 && c == 0x2F && d == 0xFD { return Some(FormatParams::raw()); } // ZSTD
+    if a == 0x04 && b == 0x22 && c == 0x4D && d == 0x18 { return Some(FormatParams::raw()); } // LZ4
+    if a == 0x52 && b == 0x61 && c == 0x72 && d == 0x21 { return Some(FormatParams::raw()); } // RAR
+    if a == 0x37 && b == 0x7A && c == 0xBC && d == 0xAF { return Some(FormatParams::raw()); } // 7z
+    if a == 0xFD && b == 0x37 && c == 0x7A && d == 0x58 { return Some(FormatParams::raw()); } // XZ
+    if a == 0x89 && b == 0x50 && c == 0x4E && d == 0x47 { return Some(FormatParams::raw()); } // PNG
+    if a == 0xFF && b == 0xD8 { return Some(FormatParams::raw()); } // JPEG
+    if a == 0x47 && b == 0x49 && c == 0x46 { return Some(FormatParams::raw()); } // GIF
+    if a == 0x49 && b == 0x44 && c == 0x33 { return Some(FormatParams::raw()); } // MP3 ID3v2
+    if a == 0xFF && (b & 0xF0) == 0xF0 { return Some(FormatParams::raw()); } // MP3 sync
+    if a == 0x66 && b == 0x4C && c == 0x61 && d == 0x43 { return Some(FormatParams::raw()); } // FLAC
+    if a == 0x4F && b == 0x67 && c == 0x67 && d == 0x53 { return Some(FormatParams::raw()); } // OGG
+    if a == 0x25 && b == 0x50 && c == 0x44 && d == 0x46 { return Some(FormatParams::raw()); } // PDF
+
+    // audio / video -> delta16 filter
+    if a == 0x52 && b == 0x49 && c == 0x46 && d == 0x46 { return Some(FormatParams::audio()); } // RIFF
+
+    // images (raw pixel) -> HASH4
+    if a == 0x42 && b == 0x4D { return Some(FormatParams::image()); } // BMP
+    if a == 0x49 && b == 0x49 && c == 0x2A && d == 0x00 { return Some(FormatParams::image()); } // TIFF LE
+    if a == 0x4D && b == 0x4D && c == 0x00 && d == 0x2A { return Some(FormatParams::image()); } // TIFF BE
+    if a == 0x50 && (b == 0x35 || b == 0x36 || b == 0x37 || b == 0x34) { return Some(FormatParams::image()); } // PGM/PPM/PAM/PBM
+
+    // executables -> HASH3, large blocks
+    if a == 0x7F && b == 0x45 && c == 0x4C && d == 0x46 { return Some(FormatParams::exe()); } // ELF
+    if a == 0x4D && b == 0x5A { return Some(FormatParams::exe()); } // PE
+    if a == 0xFE && b == 0xED && (c == 0xFA || c == 0xFB) && (d == 0xCE || d == 0xCF) { return Some(FormatParams::exe()); } // Mach-O
+    if a == 0xCA && b == 0xFE && c == 0xBA && d == 0xBE { return Some(FormatParams::exe()); } // Mach-O fat / Java class
+    if a == 0xCF && b == 0xFA && c == 0xED && d == 0xFE { return Some(FormatParams::exe()); } // Mach-O 64
+    if a == 0x00 && b == 0x61 && c == 0x73 && d == 0x6D { return Some(FormatParams::exe()); } // WASM
+
+    None
 }
 
 fn is_binary(b: u8) -> bool {
     b == 0 || (b < 0x09) || b == 0x0B || b == 0x0C || (b > 0x0D && b < 0x20) || b == 0x7F || (b >= 0x80 && b <= 0x9F)
 }
 
-fn detect_hash_type(data: &[u8]) -> HashType {
-    if let Some(ht) = detect_magic(data) {
-        return ht;
-    }
+fn scan_hash_type(data: &[u8]) -> HashType {
     let n = data.len();
     let mut binary_chars = 0usize;
     let mut seen = [false; 256];
@@ -169,12 +222,49 @@ fn detect_hash_type(data: &[u8]) -> HashType {
     }
 }
 
-pub fn compress(data: &[u8]) -> Vec<u8> {
-    let ht = detect_hash_type(data);
-    compress_inner(data, ht)
+fn detect_format(data: &[u8]) -> FormatParams {
+    if let Some(fp) = detect_magic(data) {
+        return fp;
+    }
+    FormatParams::default(scan_hash_type(data))
 }
 
-fn compress_inner(data: &[u8], ht: HashType) -> Vec<u8> {
+fn prefilter_block(data: &mut [u8], filter: Filter) {
+    match filter {
+        Filter::None => {}
+        Filter::Delta16LE => {
+            let mut prev = 0i16;
+            for chunk in data.chunks_exact_mut(2) {
+                let val = i16::from_le_bytes([chunk[0], chunk[1]]);
+                let delta = val.wrapping_sub(prev);
+                prev = val;
+                chunk.copy_from_slice(&delta.to_le_bytes());
+            }
+        }
+    }
+}
+
+fn postfilter_block(data: &mut [u8], filter: Filter) {
+    match filter {
+        Filter::None => {}
+        Filter::Delta16LE => {
+            let mut prev = 0i16;
+            for chunk in data.chunks_exact_mut(2) {
+                let delta = i16::from_le_bytes([chunk[0], chunk[1]]);
+                let val = delta.wrapping_add(prev);
+                prev = val;
+                chunk.copy_from_slice(&val.to_le_bytes());
+            }
+        }
+    }
+}
+
+pub fn compress(data: &[u8]) -> Vec<u8> {
+    let fmt = detect_format(data);
+    compress_inner(data, &fmt)
+}
+
+fn compress_inner(data: &[u8], fmt: &FormatParams) -> Vec<u8> {
     if data.is_empty() { return Vec::new(); }
 
     const BLOCK_SIZE_64K: usize = 65536;
@@ -182,22 +272,41 @@ fn compress_inner(data: &[u8], ht: HashType) -> Vec<u8> {
     const MIN_LAST_BLOCK: usize = 32768;
     let n = data.len();
 
+    let mut filtered: Vec<u8>;
+    let work: &[u8] = if fmt.filter != Filter::None {
+        filtered = data.to_vec();
+        prefilter_block(&mut filtered, fmt.filter);
+        &filtered
+    } else {
+        data
+    };
+
+    if fmt.use_raw {
+        let mut output = Vec::new();
+        let mut w = BitWriter::new();
+        w.write_bits(MAGIC_RAW, 32);
+        w.write_vlq(n as u32);
+        w.flush();
+        let header = w.into_bytes();
+        output.extend_from_slice(&header);
+        output.extend_from_slice(work);
+        return output;
+    }
+
     let mut freq = [0u32; 256];
     let mut unique = 0usize;
-    for &b in &data[..n.min(65536)] {
+    for &b in &work[..work.len().min(65536)] {
         if freq[b as usize] == 0 { unique += 1; }
         freq[b as usize] += 1;
     }
 
-    let block_size = if unique <= 10 {
-        BLOCK_SIZE_64K
-    } else {
+    let block_size = fmt.block_size.unwrap_or_else(|| {
+        if unique <= 10 { return BLOCK_SIZE_64K; }
         let max_freq = *freq.iter().max().unwrap_or(&0);
-        if max_freq as usize > n.min(65536) / 2 {
-            BLOCK_SIZE_256K
-        } else if n > 131072 {
+        if max_freq as usize > work.len().min(65536) / 2 { return BLOCK_SIZE_256K; }
+        if work.len() > 131072 {
             let mut freq2 = [0u32; 256];
-            for &b in &data[65536..131072.min(n)] {
+            for &b in &work[65536..131072.min(work.len())] {
                 freq2[b as usize] += 1;
             }
             let mut l1 = 0.0f64;
@@ -205,12 +314,12 @@ fn compress_inner(data: &[u8], ht: HashType) -> Vec<u8> {
             for i in 0..256 {
                 l1 += (freq[i] as f64 / sz - freq2[i] as f64 / sz).abs();
             }
-            if l1 < 0.15 { BLOCK_SIZE_256K } else { BLOCK_SIZE_64K }
-        } else {
-            BLOCK_SIZE_64K
+            if l1 < 0.15 { return BLOCK_SIZE_256K; }
         }
-    };
+        BLOCK_SIZE_64K
+    });
 
+    let ht = fmt.hash_type;
     let mut output = Vec::new();
     let mut block_start = 0;
 
@@ -221,11 +330,11 @@ fn compress_inner(data: &[u8], ht: HashType) -> Vec<u8> {
             block_end = n;
         }
         let win_start = block_start.saturating_sub(WINDOW);
-        let ext_data = &data[win_start..block_end];
+        let ext_data = &work[win_start..block_end];
 
         let mut block_freq = [0u32; 256];
         let mut unique = 0usize;
-        for &b in &data[block_start..block_end] {
+        for &b in &work[block_start..block_end] {
             if block_freq[b as usize] == 0 { unique += 1; }
             block_freq[b as usize] += 1;
         }
@@ -308,6 +417,7 @@ fn compress_inner(data: &[u8], ht: HashType) -> Vec<u8> {
 
         let mut h = BitWriter::new();
         h.write_bits(MAGIC, 32);
+        h.write_byte(fmt.filter as u8);
         h.write_vlq((block_end - block_start) as u32);
         write_huff_table(&mut h, &main_huff.len);
         write_huff_table(&mut h, &dist_huff.len);
@@ -343,6 +453,7 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
                 }
             }
             MAGIC => {
+                let filter_byte = r.read_bits(8) as u8;
                 let block_n = r.read_vlq() as usize;
                 let main_huff = read_huff_table(&mut r, MAIN_SYMS);
                 let dist_huff = read_huff_table(&mut r, DIST_CODES as usize);
@@ -387,6 +498,14 @@ pub fn decompress(compressed: &[u8]) -> Vec<u8> {
                     }
                 }
                 r.align();
+
+                if filter_byte != 0 {
+                    let filter = match filter_byte {
+                        1 => Filter::Delta16LE,
+                        _ => Filter::None,
+                    };
+                    postfilter_block(&mut out[dst..], filter);
+                }
             }
             _ => break,
         }
@@ -505,5 +624,42 @@ fn parse_tokens(data: &[u8], ht: &HashTables,
             main_freq[data[*pos] as usize] += 1;
             *pos += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delta16_roundtrip() {
+        let mut data = vec![0u8; 100];
+        for i in 0..50 {
+            let val = (i as i16).wrapping_mul(100);
+            data[i * 2] = val as u8;
+            data[i * 2 + 1] = (val >> 8) as u8;
+        }
+        let original = data.clone();
+        prefilter_block(&mut data, Filter::Delta16LE);
+        postfilter_block(&mut data, Filter::Delta16LE);
+        assert_eq!(data, original);
+    }
+
+    #[test]
+    fn delta16_silence() {
+        let mut data = vec![0u8; 100];
+        let original = data.clone();
+        prefilter_block(&mut data, Filter::Delta16LE);
+        postfilter_block(&mut data, Filter::Delta16LE);
+        assert_eq!(data, original);
+    }
+
+    #[test]
+    fn delta16_all_ff() {
+        let mut data = vec![0xFFu8; 100];
+        let original = data.clone();
+        prefilter_block(&mut data, Filter::Delta16LE);
+        postfilter_block(&mut data, Filter::Delta16LE);
+        assert_eq!(data, original);
     }
 }
