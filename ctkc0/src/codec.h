@@ -9,6 +9,7 @@ typedef enum {
     FILTER_NONE,
     FILTER_DELTA16,
     FILTER_ROW_DELTA,
+    FILTER_ROW_DELTA_XOR,
 } FilterType;
 
 typedef struct {

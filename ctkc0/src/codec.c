@@ -165,20 +165,28 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
     }
     if (a == 0x49 && b == 0x49 && c == 0x2A && d == 0x00) { FormatParams fp = fmt_default(HASH_TYPE_HASH4); return fp; }
     if (a == 0x4D && b == 0x4D && c == 0x00 && d == 0x2A) { FormatParams fp = fmt_default(HASH_TYPE_HASH4); return fp; }
-    if (a == 0x50 && (b == 0x35 || b == 0x36) && len >= 20) {
+    if (a == 0x50 && (b == 0x34 || b == 0x35 || b == 0x36) && len >= 20) {
         size_t pos = 2;
-        uint32_t w = 0, h = 0, maxval = 0;
+        uint32_t w = 0, h = 0;
         while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
         while (pos < len && data[pos] == '#') { while (pos < len && data[pos] != '\n') pos++; while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++; }
         while (pos < len && data[pos] >= '0' && data[pos] <= '9') { w = w * 10 + (data[pos] - '0'); pos++; }
         while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
         while (pos < len && data[pos] >= '0' && data[pos] <= '9') { h = h * 10 + (data[pos] - '0'); pos++; }
         while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
-        while (pos < len && data[pos] >= '0' && data[pos] <= '9') { maxval = maxval * 10 + (data[pos] - '0'); pos++; }
-        if (data[pos] == '\n' || data[pos] == ' ') pos++;
-        uint32_t bytes_per_pixel = (b == 0x36) ? 3 : 1;
-        uint32_t stride = w * bytes_per_pixel;
-        uint32_t pixel_data = stride * h;
+        uint32_t stride, pixel_data;
+        if (b == 0x34) {
+            stride = (w + 7) / 8;
+            pixel_data = stride * h;
+        } else {
+            uint32_t maxval = 0;
+            while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
+            while (pos < len && data[pos] >= '0' && data[pos] <= '9') { maxval = maxval * 10 + (data[pos] - '0'); pos++; }
+            if (data[pos] == '\n' || data[pos] == ' ') pos++;
+            uint32_t bytes_per_pixel = (b == 0x36) ? 3 : 1;
+            stride = w * bytes_per_pixel;
+            pixel_data = stride * h;
+        }
         FormatParams fp;
         fp.hash_type = HASH_TYPE_HASH4;
         fp.use_raw = 0;
@@ -205,11 +213,76 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
     return none_fp;
 }
 
+static uint32_t find_best_stride(const uint8_t *data, size_t len) {
+    if (len < 8) return 0;
+    size_t sample = len < 65536 ? len : 65536;
+
+    uint32_t raw_zeros = 0;
+    for (size_t i = 4; i < sample; i++) {
+        if (data[i] == 0) raw_zeros++;
+    }
+
+    uint32_t candidates[100];
+    uint32_t nc = 0;
+    uint32_t max_stride = (len < 65536) ? (uint32_t)len : 65536;
+    uint32_t min_stride = 4;
+    uint32_t sqrt_n = (uint32_t)sqrt((double)len);
+
+    for (uint32_t i = min_stride; i <= sqrt_n && i <= max_stride && nc < 100; i++) {
+        if (len % i == 0) candidates[nc++] = i;
+    }
+    for (uint32_t i = min_stride; i <= sqrt_n && i <= max_stride && nc < 100; i++) {
+        if (len % i == 0) {
+            uint32_t p = (uint32_t)(len / i);
+            if (p != i && p >= min_stride && p <= max_stride) candidates[nc++] = p;
+        }
+    }
+
+    if (nc == 0) return 0;
+
+    uint32_t best_stride = 0;
+    uint32_t best_zeros = raw_zeros;
+
+    for (uint32_t ci = 0; ci < nc; ci++) {
+        uint32_t s = candidates[ci];
+        uint32_t zeros = 0;
+        for (size_t i = s; i < sample; i++) {
+            if (data[i] == data[i - s]) zeros++;
+        }
+        if (zeros > best_zeros) {
+            best_zeros = zeros;
+            best_stride = s;
+        }
+    }
+
+    if (best_stride != 0 && best_zeros > raw_zeros) {
+        return best_stride;
+    }
+    return 0;
+}
+
 FormatParams detect_format(const uint8_t *data, size_t len) {
     FormatParams mp = detect_magic(data, len);
     if (mp.use_raw == 1) return mp;
     if (mp.use_raw == 0) return mp;
-    return fmt_default(scan_hash_type(data, len));
+
+    HashType ht = scan_hash_type(data, len);
+    FormatParams fp = fmt_default(ht);
+
+    uint32_t stride = find_best_stride(data, len);
+    if (stride > 0) {
+        size_t scan_end = len < 65536 ? len : 65536;
+        uint32_t zero_or_ff = 0;
+        for (size_t i = 0; i < scan_end; i++) {
+            if (data[i] == 0x00 || data[i] == 0xFF) zero_or_ff++;
+        }
+        if (zero_or_ff > scan_end * 4 / 5) {
+            fp.filter.type = FILTER_ROW_DELTA_XOR;
+            fp.filter.stride = stride;
+        }
+    }
+
+    return fp;
 }
 
 static void prefilter_block(uint8_t *data, size_t len, Filter filter) {
@@ -233,33 +306,6 @@ static void prefilter_block(uint8_t *data, size_t len, Filter filter) {
         if (s > 0 && s < len) {
             for (size_t i = s; i < len; i++) {
                 data[i] = data[i] - data[i - s];
-            }
-        }
-        return;
-    }
-}
-
-static void postfilter_block(uint8_t *data, size_t len, Filter filter) {
-    if (filter.type == FILTER_NONE) return;
-
-    if (filter.type == FILTER_DELTA16) {
-        int16_t prev = 0;
-        size_t n = len / 2;
-        for (size_t i = 0; i < n; i++) {
-            int16_t delta = (int16_t)((uint16_t)data[i*2] | ((uint16_t)data[i*2+1] << 8));
-            int16_t val = delta + prev;
-            prev = val;
-            data[i*2] = (uint8_t)(uint16_t)val;
-            data[i*2+1] = (uint8_t)((uint16_t)val >> 8);
-        }
-        return;
-    }
-
-    if (filter.type == FILTER_ROW_DELTA) {
-        size_t s = filter.stride;
-        if (s > 0 && s < len) {
-            for (size_t i = s; i < len; i++) {
-                data[i] = data[i] + data[i - s];
             }
         }
         return;
@@ -364,25 +410,33 @@ static int lazy_skip_cost(const uint8_t *data, size_t len, size_t pos, uint32_t 
     return skip_cost < take_cost;
 }
 
+static size_t vlq_byte_size(uint32_t v) {
+    size_t n = 1;
+    while (v >= 128) { v >>= 7; n++; }
+    return n;
+}
+
 static void write_huff_table(BitWriter *w, const uint8_t *lens, size_t n) {
-    uint16_t nonzero_syms[285];
-    uint8_t nonzero_lens[285];
-    int nonzero_count = 0;
-
-    for (size_t i = 0; i < n; i++) {
-        if (lens[i] > 0) {
-            nonzero_syms[nonzero_count] = (uint16_t)i;
-            nonzero_lens[nonzero_count] = lens[i];
-            nonzero_count++;
-        }
+    size_t runs = 0;
+    size_t rle_run_bytes = 0;
+    for (size_t i = 0; i < n; ) {
+        runs++;
+        size_t j = i + 1;
+        while (j < n && lens[j] == lens[i]) j++;
+        rle_run_bytes += vlq_byte_size((uint32_t)(j - i));
+        i = j;
     }
+    size_t rle_bytes = vlq_byte_size((uint32_t)runs) + rle_run_bytes + 1;
 
-    if (nonzero_count <= 32) {
+    if (rle_bytes < (n + 1) / 2) {
         bw_write_bit(w, 0);
-        bw_write_vlq(w, (uint32_t)nonzero_count);
-        for (int i = 0; i < nonzero_count; i++) {
-            bw_write_bits(w, nonzero_syms[i], 16);
-            bw_write_byte(w, nonzero_lens[i]);
+        bw_write_vlq(w, (uint32_t)runs);
+        for (size_t i = 0; i < n; ) {
+            size_t j = i + 1;
+            while (j < n && lens[j] == lens[i]) j++;
+            bw_write_vlq(w, (uint32_t)(j - i));
+            bw_write_bits(w, lens[i], 4);
+            i = j;
         }
     } else {
         bw_write_bit(w, 1);
@@ -399,14 +453,7 @@ static void write_huff_table(BitWriter *w, const uint8_t *lens, size_t n) {
 
 static void read_huff_table(BitReader *r, Huffman *huff, size_t n) {
     uint8_t *lens = calloc(n, 1);
-    if (br_read_bit(r) == 0) {
-        uint32_t count = br_read_vlq(r);
-        for (uint32_t i = 0; i < count; i++) {
-            uint16_t sym = (uint16_t)br_read_bits(r, 16);
-            uint8_t len = (uint8_t)br_read_bits(r, 8);
-            if (sym < n) lens[sym] = len;
-        }
-    } else {
+    if (br_read_bit(r) == 1) {
         for (size_t i = 0; i < n / 2; i++) {
             uint8_t byte = (uint8_t)br_read_bits(r, 8);
             uint8_t lo = byte & 0x0f;
@@ -417,6 +464,16 @@ static void read_huff_table(BitReader *r, Huffman *huff, size_t n) {
         if (n % 2 == 1) {
             uint8_t last = (uint8_t)br_read_bits(r, 8);
             lens[n - 1] = last >> 4;
+        }
+    } else {
+        uint32_t runs = br_read_vlq(r);
+        size_t pos = 0;
+        for (uint32_t ri = 0; ri < runs && pos < n; ri++) {
+            uint32_t run_len = br_read_vlq(r);
+            uint8_t len_val = (uint8_t)br_read_bits(r, 4);
+            for (uint32_t j = 0; j < run_len && pos < n; j++) {
+                lens[pos++] = len_val;
+            }
         }
     }
 
@@ -442,6 +499,16 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
         if (s > 0 && s < len) {
             for (size_t i = s; i < len; i++) {
                 filtered[i] = data[i] - data[i - s];
+            }
+        }
+        work = filtered;
+    } else if (fmt.filter.type == FILTER_ROW_DELTA_XOR) {
+        filtered = malloc(len);
+        memcpy(filtered, data, len);
+        size_t s = fmt.filter.stride;
+        if (s > 0 && s < len) {
+            for (size_t i = s; i < len; i++) {
+                filtered[i] = data[i] ^ data[i - s];
             }
         }
         work = filtered;
@@ -668,8 +735,11 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
             bw_write_byte(&h, 0);
         } else if (fmt.filter.type == FILTER_DELTA16) {
             bw_write_byte(&h, 1);
-        } else {
+        } else if (fmt.filter.type == FILTER_ROW_DELTA) {
             bw_write_byte(&h, 2);
+            bw_write_vlq(&h, fmt.filter.stride);
+        } else {
+            bw_write_byte(&h, 3);
             bw_write_vlq(&h, fmt.filter.stride);
         }
         bw_write_vlq(&h, (uint32_t)(block_end - block_start));
@@ -711,6 +781,9 @@ uint8_t *decompress(const uint8_t *compressed, size_t len, size_t *out_len) {
     size_t out_len_val = 0;
     size_t out_cap = 0;
 
+    Filter pending_filter;
+    int has_pending_filter = 0;
+
     for (;;) {
         if (br_byte_pos(&r) >= len - 1) break;
         uint32_t magic = br_read_bits(&r, 32);
@@ -730,15 +803,23 @@ uint8_t *decompress(const uint8_t *compressed, size_t len, size_t *out_len) {
         } else if (magic == MAGIC) {
             uint8_t filter_byte = (uint8_t)br_read_bits(&r, 8);
             Filter filter;
-            if (filter_byte == 1) {
+            if (filter_byte == 0) {
+                filter.type = FILTER_NONE;
+                filter.stride = 0;
+            } else if (filter_byte == 1) {
                 filter.type = FILTER_DELTA16;
                 filter.stride = 0;
             } else if (filter_byte == 2) {
                 filter.type = FILTER_ROW_DELTA;
                 filter.stride = br_read_vlq(&r);
             } else {
-                filter.type = FILTER_NONE;
-                filter.stride = 0;
+                filter.type = FILTER_ROW_DELTA_XOR;
+                filter.stride = br_read_vlq(&r);
+            }
+
+            if (filter_byte != 0 && !has_pending_filter) {
+                pending_filter = filter;
+                has_pending_filter = 1;
             }
 
             uint32_t block_n = br_read_vlq(&r);
@@ -794,14 +875,38 @@ uint8_t *decompress(const uint8_t *compressed, size_t len, size_t *out_len) {
             }
             br_align(&r);
 
-            if (filter_byte != 0) {
-                postfilter_block(out + dst, block_n, filter);
-            }
-
             huff_free(&main_huff);
             huff_free(&dist_huff);
         } else {
             break;
+        }
+    }
+
+    if (has_pending_filter) {
+        if (pending_filter.type == FILTER_ROW_DELTA) {
+            size_t s = pending_filter.stride;
+            if (s > 0 && s < out_len_val) {
+                for (size_t i = s; i < out_len_val; i++) {
+                    out[i] = out[i] + out[i - s];
+                }
+            }
+        } else if (pending_filter.type == FILTER_ROW_DELTA_XOR) {
+            size_t s = pending_filter.stride;
+            if (s > 0 && s < out_len_val) {
+                for (size_t i = s; i < out_len_val; i++) {
+                    out[i] = out[i] ^ out[i - s];
+                }
+            }
+        } else if (pending_filter.type == FILTER_DELTA16) {
+            int16_t prev = 0;
+            size_t n = out_len_val / 2;
+            for (size_t i = 0; i < n; i++) {
+                int16_t delta = (int16_t)((uint16_t)out[i*2] | ((uint16_t)out[i*2+1] << 8));
+                int16_t val = delta + prev;
+                prev = val;
+                out[i*2] = (uint8_t)(uint16_t)val;
+                out[i*2+1] = (uint8_t)((uint16_t)val >> 8);
+            }
         }
     }
 
