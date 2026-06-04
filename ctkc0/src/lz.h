@@ -43,6 +43,6 @@ void tb_free(TokenBuf *tb);
 void ht_build(HashTables *ht, const uint8_t *data, size_t len, HashType type);
 void ht_free(HashTables *ht);
 int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t pos, int64_t lit_cost, Token *out);
-int64_t match_cost(uint32_t off, uint32_t ln);
+int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost);
 
 #endif

@@ -426,7 +426,9 @@ static uint16_t distance_to_code(uint32_t dist, uint32_t *extra, int *overflow) 
     *extra = dist; *overflow = 1; return 31;
 }
 
-int64_t match_cost(uint32_t off, uint32_t ln) {
+static int g_is_text_block = 0;
+
+int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost) {
     uint32_t len_extra_val;
     uint16_t lc = length_to_code(ln, &len_extra_val);
     int extra_len_bits;
@@ -453,11 +455,22 @@ int64_t match_cost(uint32_t off, uint32_t ln) {
     }
 
     int dist_code_bits;
-    if (dc <= 3) dist_code_bits = 4;
-    else if (dc <= 7) dist_code_bits = 4;
-    else if (dc <= 15) dist_code_bits = 5;
-    else if (dc <= 23) dist_code_bits = 5;
-    else dist_code_bits = 6;
+    if (lit_cost >= 8 && g_is_text_block) {
+        if (dc <= 1) dist_code_bits = 3;
+        else if (dc <= 3) dist_code_bits = 3;
+        else if (dc <= 7) dist_code_bits = 4;
+        else if (dc <= 15) dist_code_bits = 5;
+        else if (dc <= 23) dist_code_bits = 6;
+        else dist_code_bits = 7;
+    } else if (lit_cost <= 4) {
+        dist_code_bits = 5;
+    } else {
+        if (dc <= 3) dist_code_bits = 4;
+        else if (dc <= 7) dist_code_bits = 4;
+        else if (dc <= 15) dist_code_bits = 5;
+        else if (dc <= 23) dist_code_bits = 5;
+        else dist_code_bits = 6;
+    }
 
     return 8 + extra_len_bits + dist_code_bits + extra_dist_bits;
 }
@@ -468,20 +481,20 @@ static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t
     Token n1;
     if (!ht_find_match(ht, data, len, pos + 1, lit_cost, &n1)) return 0;
     if (!n1.is_match) return 0;
-    int64_t t_sav = (int64_t)ln * 8 - match_cost(off, ln);
-    int64_t s1_sav = (int64_t)(n1.ln + 1) * 8 - (6 + match_cost(n1.off, n1.ln));
+    int64_t t_sav = (int64_t)ln * 8 - match_cost(off, ln, lit_cost);
+    int64_t s1_sav = (int64_t)(n1.ln + 1) * 8 - (6 + match_cost(n1.off, n1.ln, lit_cost));
     if (s1_sav <= t_sav + margin) return 0;
     if (pos + 2 + 5 > len) return 1;
     Token n2;
     if (!ht_find_match(ht, data, len, pos + 2, lit_cost, &n2)) return 1;
     if (!n2.is_match) return 1;
-    int64_t s2_sav = (int64_t)(n2.ln + 2) * 8 - (12 + match_cost(n2.off, n2.ln));
+    int64_t s2_sav = (int64_t)(n2.ln + 2) * 8 - (12 + match_cost(n2.off, n2.ln, lit_cost));
     if (s2_sav <= s1_sav + margin) return 1;
     if (pos + 3 + 5 > len) return 2;
     Token n3;
     if (!ht_find_match(ht, data, len, pos + 3, lit_cost, &n3)) return 2;
     if (!n3.is_match) return 2;
-    int64_t s3_sav = (int64_t)(n3.ln + 3) * 8 - (18 + match_cost(n3.off, n3.ln));
+    int64_t s3_sav = (int64_t)(n3.ln + 3) * 8 - (18 + match_cost(n3.off, n3.ln, lit_cost));
     if (s3_sav <= s2_sav + margin) return 2;
     return 3;
 }
@@ -492,20 +505,20 @@ static int lazy_skip_cost_depth(const uint8_t *data, size_t len, size_t pos, uin
     Token n1;
     if (!ht_find_match(ht, data, len, pos + 1, lit_cost, &n1)) return 0;
     if (!n1.is_match) return 0;
-    int64_t t_cost = match_cost(off, ln);
-    int64_t s1_cost = lit_cost + match_cost(n1.off, n1.ln);
+    int64_t t_cost = match_cost(off, ln, lit_cost);
+    int64_t s1_cost = lit_cost + match_cost(n1.off, n1.ln, lit_cost);
     if (s1_cost >= t_cost) return 0;
     if (pos + 2 + 5 > len) return 1;
     Token n2;
     if (!ht_find_match(ht, data, len, pos + 2, lit_cost, &n2)) return 1;
     if (!n2.is_match) return 1;
-    int64_t s2_cost = 2 * lit_cost + match_cost(n2.off, n2.ln);
+    int64_t s2_cost = 2 * lit_cost + match_cost(n2.off, n2.ln, lit_cost);
     if (s2_cost >= s1_cost) return 1;
     if (pos + 3 + 5 > len) return 2;
     Token n3;
     if (!ht_find_match(ht, data, len, pos + 3, lit_cost, &n3)) return 2;
     if (!n3.is_match) return 2;
-    int64_t s3_cost = 3 * lit_cost + match_cost(n3.off, n3.ln);
+    int64_t s3_cost = 3 * lit_cost + match_cost(n3.off, n3.ln, lit_cost);
     if (s3_cost >= s2_cost) return 2;
     return 3;
 }
@@ -733,6 +746,15 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
             lit_cost = (int64_t)(entropy + 0.5);
             if (lit_cost < 2) lit_cost = 2;
             if (lit_cost > 8) lit_cost = 8;
+        }
+        {
+            size_t printable = 0;
+            for (size_t i = block_start; i < block_end; i++) {
+                uint8_t b = work[i];
+                if (b >= 32 && b <= 126) printable++;
+                else if (b == 9 || b == 10 || b == 13) printable++;
+            }
+            g_is_text_block = (printable * 5 > block_len * 4);
         }
 
         TokenBuf tokens;
