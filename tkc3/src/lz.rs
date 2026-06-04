@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 const MIN_MATCH: u32 = 3;
 const MAX_MATCH: u32 = 65535;
 pub const WINDOW: usize = 65536;
-const MAX_CANDIDATES: usize = 64;
+const MAX_CANDIDATES: usize = 256;
 const NICE_MATCH: u32 = 128;
 
 #[derive(Debug, Clone)]
@@ -76,32 +76,35 @@ pub fn find_match(data: &[u8], pos: usize, ht: &HashTables, lit_cost: i64) -> Op
     if let Some(candidates) = ht.map.get(&key) {
         let idx = candidates.partition_point(|&c| (c as usize) < pos);
         let start = idx.saturating_sub(MAX_CANDIDATES);
+
+        // low-entropy: use higher nice match to find longer runs
+        let nice = if lit_cost <= 3 { MAX_MATCH } else { NICE_MATCH };
+
         for &cu in candidates[start..idx].iter().rev() {
             let cu = cu as usize;
             let diff = pos - cu;
-            if diff <= WINDOW {
-                let mut ln = 0usize;
-                let a = &data[pos..];
-                let b = &data[cu..];
-                while ln + 8 <= max_len {
-                    let va = u64::from_ne_bytes(a[ln..ln+8].try_into().unwrap());
-                    let vb = u64::from_ne_bytes(b[ln..ln+8].try_into().unwrap());
-                    if va != vb {
-                        ln += (va ^ vb).trailing_zeros() as usize / 8;
-                        break;
-                    }
-                    ln += 8;
+            if diff > WINDOW { break; }
+            let mut ln = 0usize;
+            let a = &data[pos..];
+            let b = &data[cu..];
+            while ln + 8 <= max_len {
+                let va = u64::from_ne_bytes(a[ln..ln+8].try_into().unwrap());
+                let vb = u64::from_ne_bytes(b[ln..ln+8].try_into().unwrap());
+                if va != vb {
+                    ln += (va ^ vb).trailing_zeros() as usize / 8;
+                    break;
                 }
-                while ln < max_len && a[ln] == b[ln] { ln += 1; }
-                if ln >= MIN_MATCH as usize {
-                    let sav = ln as i64 * lit_cost - match_cost(diff as u32, ln as u32);
-                    if sav > best_sav {
-                        best_sav = sav;
-                        best_off = diff as u32;
-                        best_ln = ln as u32;
-                    }
-                    if ln as u32 >= NICE_MATCH { break; }
+                ln += 8;
+            }
+            while ln < max_len && a[ln] == b[ln] { ln += 1; }
+            if ln >= MIN_MATCH as usize {
+                let sav = ln as i64 * lit_cost - match_cost(diff as u32, ln as u32);
+                if sav > best_sav {
+                    best_sav = sav;
+                    best_off = diff as u32;
+                    best_ln = ln as u32;
                 }
+                if ln as u32 >= nice { break; }
             }
         }
     }
