@@ -454,6 +454,9 @@ int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost) {
         extra_dist_bits = dist_extra[dc];
     }
 
+    int main_sym_bits = 8;
+    if (g_is_text_block && lit_cost >= 8) main_sym_bits = 9;
+
     int dist_code_bits;
     if (lit_cost >= 8 && g_is_text_block) {
         if (dc <= 1) dist_code_bits = 3;
@@ -472,7 +475,7 @@ int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost) {
         else dist_code_bits = 6;
     }
 
-    return 8 + extra_len_bits + dist_code_bits + extra_dist_bits;
+    return main_sym_bits + extra_len_bits + dist_code_bits + extra_dist_bits;
 }
 
 static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost, int margin) {
