@@ -193,12 +193,12 @@ int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t 
         size_t max_len = (len - pos) < MAX_MATCH ? (len - pos) : MAX_MATCH;
 
         uint32_t best_off = 0, best_ln = 0;
-        int64_t best_sav = -1000000000;
+        int64_t best_sav = 0;
 
         find_in_slice(data, pos, ht->entries + start, end - start, max_len, nice,
                       &best_off, &best_ln, &best_sav, lit_cost, min_match);
 
-        if (best_ln >= MIN_MATCH) {
+        if (best_ln >= MIN_MATCH && best_sav > 0) {
             out->is_match = 1;
             out->off = best_off;
             out->ln = best_ln;
@@ -213,12 +213,12 @@ int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t 
         size_t max_len = (len - pos) < MAX_MATCH ? (len - pos) : MAX_MATCH;
 
         uint32_t best_off = 0, best_ln = 0;
-        int64_t best_sav = -1000000000;
+        int64_t best_sav = 0;
 
         find_in_slice(data, pos, ht->entries + start, end - start, max_len, nice,
                       &best_off, &best_ln, &best_sav, lit_cost, min_match);
 
-        if (best_ln >= MIN_MATCH) {
+        if (best_ln >= MIN_MATCH && best_sav > 0) {
             out->is_match = 1;
             out->off = best_off;
             out->ln = best_ln;
