@@ -1,6 +1,30 @@
 #include "lz.h"
 #include <string.h>
 
+void tb_init(TokenBuf *tb) {
+    tb->data = NULL;
+    tb->count = 0;
+    tb->cap = 0;
+}
+
+void tb_push(TokenBuf *tb, int is_match, uint8_t lit, uint32_t off, uint32_t ln) {
+    if (tb->count * 2 + 2 > tb->cap) {
+        tb->cap = tb->cap ? tb->cap * 2 : 16384;
+        tb->data = realloc(tb->data, tb->cap * sizeof(uint32_t));
+    }
+    uint32_t tag = (uint32_t)(is_match ? 0x80000000U : 0) | (is_match ? off : lit);
+    tb->data[tb->count * 2] = tag;
+    tb->data[tb->count * 2 + 1] = ln;
+    tb->count++;
+}
+
+void tb_free(TokenBuf *tb) {
+    free(tb->data);
+    tb->data = NULL;
+    tb->count = 0;
+    tb->cap = 0;
+}
+
 static uint32_t hash_4(const uint8_t *data, size_t i) {
     uint32_t v = *(const uint32_t *)(data + i);
     return ((v ^ (v >> 12) ^ (v >> 24)) & HASH_MASK);

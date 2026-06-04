@@ -29,25 +29,6 @@ static const uint8_t dist_extra[32] = {
     0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14
 };
 
-typedef enum {
-    FILTER_NONE,
-    FILTER_DELTA16,
-    FILTER_ROW_DELTA,
-} FilterType;
-
-typedef struct {
-    FilterType type;
-    uint32_t stride;
-} Filter;
-
-typedef struct {
-    HashType hash_type;
-    int use_raw;
-    int block_size_set;
-    size_t block_size;
-    Filter filter;
-} FormatParams;
-
 static FormatParams fmt_raw(void) {
     FormatParams fp;
     fp.hash_type = HASH_TYPE_HASH4;
@@ -96,7 +77,7 @@ static int is_binary(uint8_t b) {
     return b == 0 || (b < 0x09) || b == 0x0B || b == 0x0C || (b > 0x0D && b < 0x20) || b == 0x7F || (b >= 0x80 && b <= 0x9F);
 }
 
-static HashType scan_hash_type(const uint8_t *data, size_t n) {
+HashType scan_hash_type(const uint8_t *data, size_t n) {
     int seen[256];
     memset(seen, 0, sizeof(seen));
     size_t binary_chars = 0;
@@ -184,7 +165,34 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
     }
     if (a == 0x49 && b == 0x49 && c == 0x2A && d == 0x00) { FormatParams fp = fmt_default(HASH_TYPE_HASH4); return fp; }
     if (a == 0x4D && b == 0x4D && c == 0x00 && d == 0x2A) { FormatParams fp = fmt_default(HASH_TYPE_HASH4); return fp; }
-    if (a == 0x50 && (b == 0x35 || b == 0x36 || b == 0x37 || b == 0x34)) { FormatParams fp = fmt_default(HASH_TYPE_HASH4); return fp; }
+    if (a == 0x50 && (b == 0x35 || b == 0x36) && len >= 20) {
+        size_t pos = 2;
+        uint32_t w = 0, h = 0, maxval = 0;
+        while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
+        while (pos < len && data[pos] == '#') { while (pos < len && data[pos] != '\n') pos++; while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++; }
+        while (pos < len && data[pos] >= '0' && data[pos] <= '9') { w = w * 10 + (data[pos] - '0'); pos++; }
+        while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
+        while (pos < len && data[pos] >= '0' && data[pos] <= '9') { h = h * 10 + (data[pos] - '0'); pos++; }
+        while (pos < len && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r')) pos++;
+        while (pos < len && data[pos] >= '0' && data[pos] <= '9') { maxval = maxval * 10 + (data[pos] - '0'); pos++; }
+        if (data[pos] == '\n' || data[pos] == ' ') pos++;
+        uint32_t bytes_per_pixel = (b == 0x36) ? 3 : 1;
+        uint32_t stride = w * bytes_per_pixel;
+        uint32_t pixel_data = stride * h;
+        FormatParams fp;
+        fp.hash_type = HASH_TYPE_HASH4;
+        fp.use_raw = 0;
+        fp.block_size_set = 0;
+        fp.block_size = 0;
+        if (stride > 0 && h > 0 && pos + pixel_data <= len) {
+            fp.filter.type = FILTER_ROW_DELTA;
+            fp.filter.stride = stride;
+        } else {
+            fp.filter.type = FILTER_NONE;
+            fp.filter.stride = 0;
+        }
+        return fp;
+    }
 
     if (a == 0xD0 && b == 0xCF && c == 0x11 && d == 0xE0) return fmt_exe();
     if (a == 0x7F && b == 0x45 && c == 0x4C && d == 0x46) return fmt_exe();
@@ -194,11 +202,10 @@ static FormatParams detect_magic(const uint8_t *data, size_t len) {
     if (a == 0xCF && b == 0xFA && c == 0xED && d == 0xFE) return fmt_exe();
     if (a == 0x00 && b == 0x61 && c == 0x73 && d == 0x6D) return fmt_exe();
 
-    none_fp.use_raw = 0;
     return none_fp;
 }
 
-static FormatParams detect_format(const uint8_t *data, size_t len) {
+FormatParams detect_format(const uint8_t *data, size_t len) {
     FormatParams mp = detect_magic(data, len);
     if (mp.use_raw == 1) return mp;
     if (mp.use_raw == 0) return mp;
@@ -544,6 +551,8 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
             if (lit_cost > 8) lit_cost = 8;
         }
 
+        TokenBuf tokens;
+        tb_init(&tokens);
         uint32_t *main_freq = calloc(MAIN_SYMS, sizeof(uint32_t));
         uint32_t *dist_freq = calloc(DIST_CODES, sizeof(uint32_t));
 
@@ -553,6 +562,7 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
         if (block_unique <= 10) {
             while (pos < ext_len) {
                 uint8_t b = ext_data[pos];
+                tb_push(&tokens, 0, b, 0, 0);
                 main_freq[b]++;
                 pos++;
             }
@@ -573,10 +583,12 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
                         do_lazy = lazy_skip(ext_data, n, pos, ln, off, &htable, lit_cost);
                     }
                     if (do_lazy) {
+                        tb_push(&tokens, 0, ext_data[pos], 0, 0);
                         main_freq[ext_data[pos]]++;
                         pos++;
                         continue;
                     }
+                    tb_push(&tokens, 1, 0, off, ln);
                     uint16_t sym = match_sym(ln);
                     main_freq[sym]++;
                     uint32_t dummy_extra;
@@ -585,6 +597,7 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
                     dist_freq[d_code]++;
                     pos += ln;
                 } else {
+                    tb_push(&tokens, 0, ext_data[pos], 0, 0);
                     main_freq[ext_data[pos]]++;
                     pos++;
                 }
@@ -600,80 +613,49 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
 
         BitWriter w;
         bw_init(&w);
-        pos = block_start - win_start;
-        if (block_unique <= 10) {
-            while (pos < ext_len) {
-                uint8_t b = ext_data[pos];
+        for (size_t ti = 0; ti < tokens.count; ti++) {
+            uint32_t tag = tokens.data[ti * 2];
+            uint32_t val2 = tokens.data[ti * 2 + 1];
+            if (!(tag & 0x80000000U)) {
+                uint8_t b = (uint8_t)tag;
                 uint32_t code; uint8_t clen;
                 huff_encode(&main_huff, b, &code, &clen);
                 bw_write_bits(&w, code, clen);
-                pos++;
-            }
-        } else {
-            HashTables htable;
-            ht_build(&htable, ext_data, ext_len, ht);
-            size_t n = ext_len;
+            } else {
+                uint32_t off = tag & 0x7FFFFFFFU;
+                uint32_t ln = val2;
+                uint16_t sym = match_sym(ln);
+                uint32_t code; uint8_t clen;
+                huff_encode(&main_huff, sym, &code, &clen);
+                bw_write_bits(&w, code, clen);
 
-            while (pos < n) {
-                Token tok;
-                if (ht_find_match(&htable, ext_data, n, pos, lit_cost, &tok)) {
-                    uint32_t ln = tok.ln;
-                    uint32_t off = tok.off;
-                    int do_lazy;
-                    if (low_entropy) {
-                        do_lazy = lazy_skip_cost(ext_data, n, pos, ln, off, &htable, lit_cost);
+                uint32_t extra;
+                uint16_t lc = length_to_code(ln, &extra);
+                uint32_t len_extra_bits = len_extra[lc - 256];
+                if (lc == 284) {
+                    if (ln > 258) {
+                        bw_write_bit(&w, 1);
+                        bw_write_vlq(&w, ln - 258);
                     } else {
-                        do_lazy = lazy_skip(ext_data, n, pos, ln, off, &htable, lit_cost);
+                        bw_write_bit(&w, 0);
                     }
-                    if (do_lazy) {
-                        uint32_t code; uint8_t clen;
-                        huff_encode(&main_huff, ext_data[pos], &code, &clen);
-                        bw_write_bits(&w, code, clen);
-                        pos++;
-                        continue;
-                    }
+                } else if (len_extra_bits > 0) {
+                    bw_write_bits(&w, extra, len_extra_bits);
+                }
 
-                    uint16_t sym = match_sym(ln);
-                    uint32_t code; uint8_t clen;
-                    huff_encode(&main_huff, sym, &code, &clen);
-                    bw_write_bits(&w, code, clen);
-
-                    uint32_t extra;
-                    uint16_t lc = length_to_code(ln, &extra);
-                    uint32_t len_extra_bits = len_extra[lc - 256];
-                    if (lc == 284) {
-                        if (ln > 258) {
-                            bw_write_bit(&w, 1);
-                            bw_write_vlq(&w, ln - 258);
-                        } else {
-                            bw_write_bit(&w, 0);
-                        }
-                    } else if (len_extra_bits > 0) {
-                        bw_write_bits(&w, extra, len_extra_bits);
-                    }
-
-                    uint32_t d_extra;
-                    int d_overflow;
-                    uint16_t d_code = distance_to_code(off, &d_extra, &d_overflow);
-                    huff_encode(&dist_huff, d_code, &code, &clen);
-                    bw_write_bits(&w, code, clen);
-                    if (d_overflow) {
-                        bw_write_vlq(&w, d_extra);
-                    } else {
-                        if (dist_extra[d_code] > 0) {
-                            bw_write_bits(&w, d_extra, dist_extra[d_code]);
-                        }
-                    }
-
-                    pos += ln;
+                uint32_t d_extra;
+                int d_overflow;
+                uint16_t d_code = distance_to_code(off, &d_extra, &d_overflow);
+                huff_encode(&dist_huff, d_code, &code, &clen);
+                bw_write_bits(&w, code, clen);
+                if (d_overflow) {
+                    bw_write_vlq(&w, d_extra);
                 } else {
-                    uint32_t code; uint8_t clen;
-                    huff_encode(&main_huff, ext_data[pos], &code, &clen);
-                    bw_write_bits(&w, code, clen);
-                    pos++;
+                    if (dist_extra[d_code] > 0) {
+                        bw_write_bits(&w, d_extra, dist_extra[d_code]);
+                    }
                 }
             }
-            ht_free(&htable);
         }
 
         size_t bitstream_len;

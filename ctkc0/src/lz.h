@@ -30,6 +30,16 @@ typedef struct {
     uint8_t lit;
 } Token;
 
+typedef struct {
+    uint32_t *data;  // packed: low 31 bits = off/byte, high bit = is_match; second uint = ln
+    size_t count;
+    size_t cap;
+} TokenBuf;
+
+void tb_init(TokenBuf *tb);
+void tb_push(TokenBuf *tb, int is_match, uint8_t lit, uint32_t off, uint32_t ln);
+void tb_free(TokenBuf *tb);
+
 void ht_build(HashTables *ht, const uint8_t *data, size_t len, HashType type);
 void ht_free(HashTables *ht);
 int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t pos, int64_t lit_cost, Token *out);
