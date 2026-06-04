@@ -416,7 +416,7 @@ static uint16_t distance_to_code(uint32_t dist, uint32_t *extra, int *overflow) 
     *extra = dist; *overflow = 1; return 31;
 }
 
-static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost) {
+static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost, int margin) {
     if (ln > 5) return 0;
     if (pos + 1 + 5 > len) return 0;
     Token n1;
@@ -424,19 +424,19 @@ static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t
     if (!n1.is_match) return 0;
     int64_t t_sav = (int64_t)ln * 8 - match_cost(off, ln);
     int64_t s1_sav = (int64_t)(n1.ln + 1) * 8 - (6 + match_cost(n1.off, n1.ln));
-    if (s1_sav <= t_sav + 8) return 0;
+    if (s1_sav <= t_sav + margin) return 0;
     if (pos + 2 + 5 > len) return 1;
     Token n2;
     if (!ht_find_match(ht, data, len, pos + 2, lit_cost, &n2)) return 1;
     if (!n2.is_match) return 1;
     int64_t s2_sav = (int64_t)(n2.ln + 2) * 8 - (12 + match_cost(n2.off, n2.ln));
-    if (s2_sav <= s1_sav + 8) return 1;
+    if (s2_sav <= s1_sav + margin) return 1;
     if (pos + 3 + 5 > len) return 2;
     Token n3;
     if (!ht_find_match(ht, data, len, pos + 3, lit_cost, &n3)) return 2;
     if (!n3.is_match) return 2;
     int64_t s3_sav = (int64_t)(n3.ln + 3) * 8 - (18 + match_cost(n3.off, n3.ln));
-    if (s3_sav <= s2_sav + 8) return 2;
+    if (s3_sav <= s2_sav + margin) return 2;
     return 3;
 }
 
@@ -718,7 +718,12 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
                     if (low_entropy) {
                         skip = lazy_skip_cost_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
                     } else {
-                        skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
+                        int binary_count = 0;
+                        for (int i = 0; i < 256; i++) {
+                            if (is_binary(i)) binary_count += block_freq[i];
+                        }
+                        int margin = (binary_count * 10 > (int)block_len) ? 4 : 8;
+                        skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost, margin);
                     }
                     if (skip > 0) {
                         for (int i = 0; i < skip; i++) {
