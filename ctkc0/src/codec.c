@@ -431,7 +431,13 @@ static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t
     if (!n2.is_match) return 1;
     int64_t s2_sav = (int64_t)(n2.ln + 2) * 8 - (12 + match_cost(n2.off, n2.ln));
     if (s2_sav <= s1_sav + 8) return 1;
-    return 2;
+    if (pos + 3 + 5 > len) return 2;
+    Token n3;
+    if (!ht_find_match(ht, data, len, pos + 3, lit_cost, &n3)) return 2;
+    if (!n3.is_match) return 2;
+    int64_t s3_sav = (int64_t)(n3.ln + 3) * 8 - (18 + match_cost(n3.off, n3.ln));
+    if (s3_sav <= s2_sav + 8) return 2;
+    return 3;
 }
 
 static int lazy_skip_cost_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost) {
@@ -449,7 +455,13 @@ static int lazy_skip_cost_depth(const uint8_t *data, size_t len, size_t pos, uin
     if (!n2.is_match) return 1;
     int64_t s2_cost = 2 * lit_cost + match_cost(n2.off, n2.ln);
     if (s2_cost >= s1_cost) return 1;
-    return 2;
+    if (pos + 3 + 5 > len) return 2;
+    Token n3;
+    if (!ht_find_match(ht, data, len, pos + 3, lit_cost, &n3)) return 2;
+    if (!n3.is_match) return 2;
+    int64_t s3_cost = 3 * lit_cost + match_cost(n3.off, n3.ln);
+    if (s3_cost >= s2_cost) return 2;
+    return 3;
 }
 
 static size_t vlq_byte_size(uint32_t v) {
