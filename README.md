@@ -139,42 +139,42 @@ with RLE-compressed Huffman tables, run-length encoded match tokens, and
 prefilters (RowDelta, XOR RowDelta, Delta16) for specific data types.
 
 currently 19/30 files beat gzip 1.14 -9 (git for windows) on the
-calgary/canterbury corpus. total: ctkc0=2,205,553 gzip=2,257,101 (-51,548).
+calgary/canterbury corpus. total: ctkc0=2,197,663 gzip=2,257,101 (-59,438).
 
 ### compression ratios vs gzip 1.14 -9 (calgary/canterbury corpus)
 
 | file | ctkc0 | gzip | diff |
 |------|-------|------|------|
-| alice29.txt | 53449 (36.0%) | 53441 (36.0%) | +8 |
-| asyoulik.txt | 48689 (38.9%) | 48840 (39.0%) | -151 |
-| bib | 34653 (31.2%) | 34908 (31.4%) | -255 |
-| book1 | 313027 (40.7%) | 312289 (40.6%) | +738 |
-| book2 | 204332 (33.5%) | 206166 (33.8%) | -1834 |
-| cp.html | 7953 (32.3%) | 7992 (32.5%) | -39 |
-| fields.c | 3153 (28.3%) | 3147 (28.2%) | +6 |
-| geo | 67707 (66.1%) | 68422 (66.8%) | -715 |
-| grammar.lsp | 1238 (33.3%) | 1257 (33.8%) | -19 |
-| kennedy.xls | 210472 (20.4%) | 209744 (20.4%) | +728 |
-| lcet10.txt | 141432 (33.7%) | 142590 (34.0%) | -1158 |
-| news | 142540 (37.8%) | 144408 (38.3%) | -1868 |
-| obj1 | 10319 (48.0%) | 10328 (48.0%) | -9 |
-| obj2 | 81608 (33.1%) | 81095 (32.9%) | +513 |
+| alice29.txt | 53184 (35.8%) | 53441 (36.0%) | -257 |
+| asyoulik.txt | 48425 (38.7%) | 48840 (39.0%) | -415 |
+| bib | 34473 (31.0%) | 34908 (31.4%) | -435 |
+| book1 | 309154 (40.2%) | 312289 (40.6%) | -3135 |
+| book2 | 203440 (33.3%) | 206166 (33.8%) | -2726 |
+| cp.html | 7968 (32.4%) | 7992 (32.5%) | -24 |
+| fields.c | 3163 (28.4%) | 3147 (28.2%) | +16 |
+| geo | 68236 (66.6%) | 68422 (66.8%) | -186 |
+| grammar.lsp | 1244 (33.4%) | 1257 (33.8%) | -13 |
+| kennedy.xls | 210492 (20.4%) | 209744 (20.4%) | +748 |
+| lcet10.txt | 140845 (33.6%) | 142590 (34.0%) | -1745 |
+| news | 142181 (37.7%) | 144408 (38.3%) | -2227 |
+| obj1 | 10343 (48.1%) | 10328 (48.0%) | +15 |
+| obj2 | 81530 (33.0%) | 81095 (32.9%) | +435 |
 | pi.txt | 424777 (42.5%) | 470445 (47.0%) | -45668 |
-| pic | 51283 (10.0%) | 52389 (10.2%) | -1106 |
-| plrabn12.txt | 193453 (41.1%) | 193118 (41.0%) | +335 |
-| paper1 | 18499 (34.8%) | 18551 (34.9%) | -52 |
-| paper2 | 29553 (36.0%) | 29675 (36.1%) | -122 |
-| paper3 | 17956 (38.6%) | 18082 (38.9%) | -126 |
-| paper4 | 5530 (41.6%) | 5542 (41.7%) | -12 |
-| paper5 | 5007 (41.9%) | 5003 (41.9%) | +4 |
-| paper6 | 13391 (35.2%) | 13221 (34.7%) | +170 |
-| progc | 13400 (33.8%) | 13269 (33.5%) | +131 |
-| progl | 16169 (22.6%) | 16172 (22.6%) | -3 |
-| progp | 11252 (22.8%) | 11194 (22.7%) | +58 |
-| ptt5 | 51283 (10.0%) | 52393 (10.2%) | -1110 |
-| sum | 12816 (33.5%) | 12783 (33.4%) | +33 |
-| trans | 18854 (20.1%) | 18870 (20.1%) | -16 |
-| xargs.1 | 1758 (41.6%) | 1767 (41.8%) | -9 |
+| pic | 51019 (9.9%) | 52389 (10.2%) | -1370 |
+| plrabn12.txt | 191204 (40.6%) | 193118 (41.0%) | -1914 |
+| paper1 | 18545 (34.9%) | 18551 (34.9%) | -6 |
+| paper2 | 29589 (36.0%) | 29675 (36.1%) | -86 |
+| paper3 | 18044 (38.8%) | 18082 (38.9%) | -38 |
+| paper4 | 5533 (41.6%) | 5542 (41.7%) | -9 |
+| paper5 | 5018 (42.0%) | 5003 (41.9%) | +15 |
+| paper6 | 13440 (35.3%) | 13221 (34.7%) | +219 |
+| progc | 13513 (34.1%) | 13269 (33.5%) | +244 |
+| progl | 16318 (22.8%) | 16172 (22.6%) | +146 |
+| progp | 11271 (22.8%) | 11194 (22.7%) | +77 |
+| ptt5 | 51019 (9.9%) | 52393 (10.2%) | -1374 |
+| sum | 12878 (33.7%) | 12783 (33.4%) | +95 |
+| trans | 19057 (20.3%) | 18870 (20.1%) | +187 |
+| xargs.1 | 1760 (41.6%) | 1767 (41.8%) | -7 |
 
 key improvements vs stkc0: RLE Huffman table encoding (saves ~100-150 bytes
 per block on most files), XOR RowDelta prefilter for 1-bit bitmap data (PBM,
@@ -186,7 +186,10 @@ and ratio by ~800 bytes. lazy match 2 (checking pos+2) adds another ~1375 bytes
 with no speed cost. lazy match 3 (checking pos+3) adds another ~195 bytes.
 binary-ratio adaptive margin (with uniform-data guard) saves ~405 bytes: geo -414, obj2 +2, sum +7.
 ht_find_match best_sav=0 (reject non-positive savings) saves ~7278 bytes: pic/ptt5 -3450 each, geo -200, news -118.
-now 19/30 files beat gzip (pic, ptt5, progl, trans joined the winning list).
+match_cost rewritten to use actual encoding tables (len_base/len_extra, dist_base/dist_extra,
+length_to_code/distance_to_code) with 8-bit length Huffman approximation + 5-bit fixed distance code.
+batch literal emit for repeated byte runs (fixes pic/ptt5 speed regression, 0.31x->0.43x gzip).
+net: -7890 bytes, 19/30 files beat gzip (-59,438 total).
 
 ### building
 
