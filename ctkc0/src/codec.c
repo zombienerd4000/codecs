@@ -416,6 +416,35 @@ static uint16_t distance_to_code(uint32_t dist, uint32_t *extra, int *overflow) 
     *extra = dist; *overflow = 1; return 31;
 }
 
+int64_t match_cost(uint32_t off, uint32_t ln) {
+    uint32_t len_extra_val;
+    uint16_t lc = length_to_code(ln, &len_extra_val);
+    int extra_len_bits;
+    if (lc == 284 && ln > 258) {
+        uint32_t v = ln - 258;
+        extra_len_bits = 1;
+        while (v > 0) { extra_len_bits += 8; v >>= 7; }
+    } else if (lc == 284) {
+        extra_len_bits = 1;
+    } else {
+        extra_len_bits = len_extra[lc - 256];
+    }
+
+    uint32_t dextra;
+    int doflow;
+    uint16_t dc = distance_to_code(off, &dextra, &doflow);
+    int extra_dist_bits;
+    if (doflow) {
+        uint32_t v = dextra;
+        extra_dist_bits = 0;
+        while (v > 0) { extra_dist_bits += 8; v >>= 7; }
+    } else {
+        extra_dist_bits = dist_extra[dc];
+    }
+
+    return 8 + extra_len_bits + 8 + extra_dist_bits;
+}
+
 static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost, int margin) {
     if (ln > 5) return 0;
     if (pos + 1 + 5 > len) return 0;
@@ -743,9 +772,14 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
                     dist_freq[d_code]++;
                     pos += ln;
                 } else {
-                    tb_push(&tokens, 0, ext_data[pos], 0, 0);
-                    main_freq[ext_data[pos]]++;
-                    pos++;
+                    uint8_t b = ext_data[pos];
+                    size_t run = 1;
+                    while (pos + run < n && ext_data[pos + run] == b) run++;
+                    for (size_t i = 0; i < run; i++) {
+                        tb_push(&tokens, 0, b, 0, 0);
+                        main_freq[b]++;
+                    }
+                    pos += run;
                 }
             }
             ht_free(&htable);

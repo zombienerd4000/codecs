@@ -109,31 +109,7 @@ void ht_free(HashTables *ht) {
     free(ht->offsets);
 }
 
-static int64_t offset_bits(uint32_t off) {
-    if (off <= 8) return 4;
-    if (off <= 40) return 7;
-    if (off <= 168) return 10;
-    if (off <= 1192) return 14;
-    if (off <= 11272) return 19;
-    int64_t v = off;
-    int64_t bits = 5;
-    while (v > 0) { bits += 8; v >>= 7; }
-    return bits;
-}
 
-static int64_t length_bits(uint32_t ln) {
-    if (ln <= 10) return 4;
-    if (ln <= 26) return 6;
-    if (ln <= 90) return 9;
-    int64_t v = ln;
-    int64_t bits = 3;
-    while (v > 0) { bits += 8; v >>= 7; }
-    return bits;
-}
-
-int64_t match_cost(uint32_t off, uint32_t ln) {
-    return offset_bits(off) + length_bits(ln);
-}
 
 static void find_in_slice(const uint8_t *data, size_t pos, const uint32_t *slice, size_t slice_len,
                           size_t max_len, uint32_t nice, uint32_t *best_off, uint32_t *best_ln,
