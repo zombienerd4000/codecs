@@ -139,7 +139,7 @@ with RLE-compressed Huffman tables, run-length encoded match tokens, and
 prefilters (RowDelta, XOR RowDelta, Delta16) for specific data types.
 
 currently 16/30 files beat gzip 1.14 -9 (git for windows) on the
-calgary/canterbury corpus. total: ctkc0=2,212,970 gzip=2,257,101 (-44,131).
+calgary/canterbury corpus. total: ctkc0=2,212,828 gzip=2,257,101 (-44,273).
 
 ### compression ratios vs gzip 1.14 -9 (calgary/canterbury corpus)
 
@@ -154,7 +154,7 @@ calgary/canterbury corpus. total: ctkc0=2,212,970 gzip=2,257,101 (-44,131).
 | fields.c | 3153 (28.3%) | 3147 (28.2%) | +6 |
 | geo | 67907 (66.3%) | 68422 (66.8%) | -515 |
 | grammar.lsp | 1238 (33.3%) | 1257 (33.8%) | -19 |
-| kennedy.xls | 210582 (20.4%) | 209744 (20.4%) | +838 |
+| kennedy.xls | 210443 (20.4%) | 209744 (20.4%) | +699 |
 | lcet10.txt | 141431 (33.7%) | 142590 (34.0%) | -1159 |
 | news | 142658 (37.8%) | 144408 (38.3%) | -1750 |
 | obj1 | 10323 (48.0%) | 10328 (48.0%) | -5 |
@@ -184,8 +184,7 @@ function changed from xor-based to multiplicative golden ratio.
 latest: 3-byte quick-reject + MAX_CANDIDATES=1024 improved encode speed 2-5x
 and ratio by ~800 bytes. lazy match 2 (checking pos+2) adds another ~1375 bytes
 with no speed cost. lazy match 3 (checking pos+3) adds another ~195 bytes.
-binary-ratio adaptive margin saves another ~266 bytes on geo (seismic data)
-by using margin=4 for binary-heavy blocks vs margin=8 for text blocks.
+binary-ratio adaptive margin (with uniform-data guard) saves ~405 bytes: geo -414, obj2 +2, sum +7.
 
 ### building
 

@@ -722,7 +722,8 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
                         for (int i = 0; i < 256; i++) {
                             if (is_binary(i)) binary_count += block_freq[i];
                         }
-                        int margin = (binary_count * 10 > (int)block_len) ? 4 : 8;
+                        int uniform = (max_block_freq * 3 > (uint32_t)block_len);
+                        int margin = (!uniform && binary_count * 10 > (int)block_len) ? 4 : 8;
                         skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost, margin);
                     }
                     if (skip > 0) {
