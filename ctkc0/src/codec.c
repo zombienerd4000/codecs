@@ -416,26 +416,40 @@ static uint16_t distance_to_code(uint32_t dist, uint32_t *extra, int *overflow) 
     *extra = dist; *overflow = 1; return 31;
 }
 
-static int lazy_skip(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost) {
+static int lazy_skip_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost) {
     if (ln > 5) return 0;
     if (pos + 1 + 5 > len) return 0;
-    Token next;
-    if (!ht_find_match(ht, data, len, pos + 1, lit_cost, &next)) return 0;
-    if (!next.is_match) return 0;
-    int64_t cur_sav = (int64_t)ln * 8 - match_cost(off, ln);
-    int64_t nxt_sav = (int64_t)(next.ln + 1) * 8 - (6 + match_cost(next.off, next.ln));
-    return nxt_sav > cur_sav + 8;
+    Token n1;
+    if (!ht_find_match(ht, data, len, pos + 1, lit_cost, &n1)) return 0;
+    if (!n1.is_match) return 0;
+    int64_t t_sav = (int64_t)ln * 8 - match_cost(off, ln);
+    int64_t s1_sav = (int64_t)(n1.ln + 1) * 8 - (6 + match_cost(n1.off, n1.ln));
+    if (s1_sav <= t_sav + 8) return 0;
+    if (pos + 2 + 5 > len) return 1;
+    Token n2;
+    if (!ht_find_match(ht, data, len, pos + 2, lit_cost, &n2)) return 1;
+    if (!n2.is_match) return 1;
+    int64_t s2_sav = (int64_t)(n2.ln + 2) * 8 - (12 + match_cost(n2.off, n2.ln));
+    if (s2_sav <= s1_sav + 8) return 1;
+    return 2;
 }
 
-static int lazy_skip_cost(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost) {
+static int lazy_skip_cost_depth(const uint8_t *data, size_t len, size_t pos, uint32_t ln, uint32_t off, const HashTables *ht, int64_t lit_cost) {
     if (ln > 5) return 0;
     if (pos + 1 + 5 > len) return 0;
-    Token next;
-    if (!ht_find_match(ht, data, len, pos + 1, lit_cost, &next)) return 0;
-    if (!next.is_match) return 0;
-    int64_t skip_cost = lit_cost + match_cost(next.off, next.ln);
-    int64_t take_cost = match_cost(off, ln);
-    return skip_cost < take_cost;
+    Token n1;
+    if (!ht_find_match(ht, data, len, pos + 1, lit_cost, &n1)) return 0;
+    if (!n1.is_match) return 0;
+    int64_t t_cost = match_cost(off, ln);
+    int64_t s1_cost = lit_cost + match_cost(n1.off, n1.ln);
+    if (s1_cost >= t_cost) return 0;
+    if (pos + 2 + 5 > len) return 1;
+    Token n2;
+    if (!ht_find_match(ht, data, len, pos + 2, lit_cost, &n2)) return 1;
+    if (!n2.is_match) return 1;
+    int64_t s2_cost = 2 * lit_cost + match_cost(n2.off, n2.ln);
+    if (s2_cost >= s1_cost) return 1;
+    return 2;
 }
 
 static size_t vlq_byte_size(uint32_t v) {
@@ -688,16 +702,18 @@ uint8_t *compress(const uint8_t *data, size_t len, size_t *out_len) {
                 if (ht_find_match(&htable, ext_data, n, pos, lit_cost, &tok)) {
                     uint32_t ln = tok.ln;
                     uint32_t off = tok.off;
-                    int do_lazy;
+                    int skip;
                     if (low_entropy) {
-                        do_lazy = lazy_skip_cost(ext_data, n, pos, ln, off, &htable, lit_cost);
+                        skip = lazy_skip_cost_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
                     } else {
-                        do_lazy = lazy_skip(ext_data, n, pos, ln, off, &htable, lit_cost);
+                        skip = lazy_skip_depth(ext_data, n, pos, ln, off, &htable, lit_cost);
                     }
-                    if (do_lazy) {
-                        tb_push(&tokens, 0, ext_data[pos], 0, 0);
-                        main_freq[ext_data[pos]]++;
-                        pos++;
+                    if (skip > 0) {
+                        for (int i = 0; i < skip; i++) {
+                            tb_push(&tokens, 0, ext_data[pos + i], 0, 0);
+                            main_freq[ext_data[pos + i]]++;
+                        }
+                        pos += skip;
                         continue;
                     }
                     tb_push(&tokens, 1, 0, off, ln);
