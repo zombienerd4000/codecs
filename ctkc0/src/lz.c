@@ -114,9 +114,13 @@ void ht_free(HashTables *ht) {
 static void find_in_slice(const uint8_t *data, size_t pos, const uint32_t *slice, size_t slice_len,
                           size_t max_len, uint32_t nice, uint32_t *best_off, uint32_t *best_ln,
                           int64_t *best_sav, int64_t lit_cost, uint32_t min_match) {
-    size_t idx = 0;
-    while (idx < slice_len && slice[idx] < (uint32_t)pos) idx++;
-    size_t n_candidates = idx;
+    size_t lo = 0, hi = slice_len;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (slice[mid] < (uint32_t)pos) lo = mid + 1;
+        else hi = mid;
+    }
+    size_t n_candidates = lo;
     size_t iter_start = (n_candidates > MAX_CANDIDATES) ? n_candidates - MAX_CANDIDATES : 0;
     if (n_candidates == iter_start) return;
 
