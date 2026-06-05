@@ -34,8 +34,37 @@ void bw_write_bit(BitWriter *w, uint32_t b) {
 }
 
 void bw_write_bits(BitWriter *w, uint32_t val, uint32_t n) {
-    for (uint32_t i = n; i > 0; i--) {
-        bw_write_bit(w, (val >> (i - 1)) & 1);
+    if (n == 0) return;
+    uint32_t room = 8 - w->bits;
+    if (n <= room) {
+        w->byte = (w->byte << n) | val;
+        w->bits += n;
+        if (w->bits == 8) {
+            bw_grow(w);
+            w->buf[w->len++] = (uint8_t)w->byte;
+            w->byte = 0;
+            w->bits = 0;
+        }
+        return;
+    }
+    if (w->bits > 0) {
+        w->byte = (w->byte << room) | (val >> (n - room));
+        bw_grow(w);
+        w->buf[w->len++] = (uint8_t)w->byte;
+        w->byte = 0;
+        w->bits = 0;
+        n -= room;
+        val &= (1U << n) - 1;
+    }
+    while (n >= 8) {
+        n -= 8;
+        uint8_t out = (uint8_t)(val >> n);
+        bw_grow(w);
+        w->buf[w->len++] = out;
+    }
+    if (n > 0) {
+        w->byte = val;
+        w->bits = n;
     }
 }
 
