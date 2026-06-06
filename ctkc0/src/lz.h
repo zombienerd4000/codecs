@@ -9,7 +9,7 @@
 #define WINDOW 65536
 #define MAX_CANDIDATES 2048
 #define NICE_MATCH 128
-#define HASH_MASK 0xFFFF
+#define HASH_MASK 0x1FFFF
 
 typedef enum {
     HASH_TYPE_HASH4,

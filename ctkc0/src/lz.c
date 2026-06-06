@@ -39,12 +39,12 @@ void tb_free(TokenBuf *tb) {
 
 static uint32_t hash_4(const uint8_t *data, size_t i) {
     uint32_t v = *(const uint32_t *)(data + i);
-    return ((v * 2654435761U) >> 16) & HASH_MASK;
+    return ((v * 2654435761U) >> 15) & HASH_MASK;
 }
 
 static uint32_t hash_3(const uint8_t *data, size_t i) {
     uint32_t v = (uint32_t)data[i] | ((uint32_t)data[i + 1] << 8) | ((uint32_t)data[i + 2] << 16);
-    return ((v * 2654435761U) >> 16) & HASH_MASK;
+    return ((v * 2654435761U) >> 15) & HASH_MASK;
 }
 
 void ht_build(HashTables *ht, const uint8_t *data, size_t len, HashType type) {
