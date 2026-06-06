@@ -162,7 +162,7 @@ static void find_in_slice(const uint8_t *data, size_t pos, const uint32_t *slice
 
 int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t pos, int64_t lit_cost, Token *out) {
     uint32_t min_match = MIN_MATCH;
-    uint32_t nice = (lit_cost <= 3) ? MAX_MATCH : NICE_MATCH;
+    uint32_t nice = (lit_cost <= 3) ? MAX_MATCH : (g_is_text_block ? 24 : NICE_MATCH);
     out->is_match = 0;
 
     if (ht->ht == HASH_TYPE_HASH4) {
