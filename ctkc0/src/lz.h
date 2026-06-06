@@ -8,6 +8,7 @@
 #define MAX_MATCH 65535
 #define WINDOW 65536
 #define MAX_CANDIDATES 2560
+#define MAX_SLOT_CANDIDATES 256
 #define NICE_MATCH 128
 #define HASH_MASK 0x1FFFF
 
@@ -40,12 +41,21 @@ void tb_init(TokenBuf *tb);
 void tb_push(TokenBuf *tb, int is_match, uint8_t lit, uint32_t off, uint32_t ln);
 void tb_free(TokenBuf *tb);
 
+typedef struct {
+    Token tokens[8];
+    size_t positions[8];
+    int valid[8];
+} MatchCache;
+
+static inline void mc_init(MatchCache *mc) {
+    for (int i = 0; i < 8; i++) mc->valid[i] = 0;
+}
+
 void ht_build(HashTables *ht, const uint8_t *data, size_t len, HashType type);
 void ht_free(HashTables *ht);
 int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t pos, int64_t lit_cost, Token *out);
+int ht_find_match_cached(MatchCache *mc, const HashTables *ht, const uint8_t *data, size_t len, size_t pos, int64_t lit_cost, Token *out);
 int64_t match_cost(uint32_t off, uint32_t ln, int64_t lit_cost);
-extern const uint8_t *g_match_main_lens;
-extern const uint8_t *g_match_dist_lens;
 extern const uint8_t *g_match_main_lens;
 extern const uint8_t *g_match_dist_lens;
 

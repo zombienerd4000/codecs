@@ -121,7 +121,8 @@ static void find_in_slice(const uint8_t *data, size_t pos, const uint32_t *slice
         else hi = mid;
     }
     size_t n_candidates = lo;
-    size_t iter_start = (n_candidates > MAX_CANDIDATES) ? n_candidates - MAX_CANDIDATES : 0;
+    size_t slot_limit = MAX_CANDIDATES < MAX_SLOT_CANDIDATES ? MAX_CANDIDATES : MAX_SLOT_CANDIDATES;
+    size_t iter_start = (n_candidates > slot_limit) ? n_candidates - slot_limit : 0;
     if (n_candidates == iter_start) return;
 
     uint32_t pos_bytes = *(const uint32_t *)(data + pos);
@@ -206,4 +207,20 @@ int ht_find_match(const HashTables *ht, const uint8_t *data, size_t len, size_t 
         }
     }
     return 0;
+}
+
+int ht_find_match_cached(MatchCache *mc, const HashTables *ht, const uint8_t *data, size_t len, size_t pos, int64_t lit_cost, Token *out) {
+    size_t idx = pos & 7;
+    if (mc->valid[idx] && mc->positions[idx] == pos) {
+        if (mc->tokens[idx].is_match) {
+            *out = mc->tokens[idx];
+            return 1;
+        }
+        return 0;
+    }
+    int r = ht_find_match(ht, data, len, pos, lit_cost, out);
+    mc->valid[idx] = 1;
+    mc->positions[idx] = pos;
+    mc->tokens[idx] = *out;
+    return r;
 }
