@@ -7,7 +7,7 @@
 #define MIN_MATCH 3
 #define MAX_MATCH 65535
 #define WINDOW 65536
-#define MAX_CANDIDATES 2048
+#define MAX_CANDIDATES 2560
 #define NICE_MATCH 128
 #define HASH_MASK 0x1FFFF
 
